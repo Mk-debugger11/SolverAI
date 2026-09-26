@@ -63,11 +63,10 @@ export default function SettingsDrawer({
               localStorage.setItem('groq_model', e.target.value);
             }}
           >
-            <option value="qwen/qwen3.8-27b">qwen/qwen3.8-27b (Recommended, Ultra-Fast ~80ms)</option>
-            <option value="openai/gpt-oss-120b">openai/gpt-oss-120b (High Reasoning)</option>
-            <option value="openai/gpt-oss-20b">openai/gpt-oss-20b</option>
-            <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
-            <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+            <option value="qwen/qwen3.8-27b">qwen/qwen3.8-27b (Recommended, Ultra-Fast ~18-80ms)</option>
+            <option value="openai/gpt-oss-120b">openai/gpt-oss-120b (Deep Reasoning)</option>
+            <option value="openai/gpt-oss-20b">openai/gpt-oss-20b (Balanced Reasoning)</option>
+            <option value="allam-2-7b">allam-2-7b</option>
           </select>
         </div>
 

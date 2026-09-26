@@ -104,14 +104,76 @@ export async function runFullQuizAutomation({
 
       const payload = formatLlmPayload(q);
 
-      // 3. Query LLM Solver
+      // 3. Query LLM Solver with automatic rate-limit cooldown, retries, and fallback
       const tSolveStart = performance.now();
-      const solution = await solveMcq(payload, {
-        apiKey: llmConfig?.apiKey,
-        model: llmConfig?.model,
-        turbo: turboMode,
-        maxTokens,
-      });
+      let solution = null;
+
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          solution = await solveMcq(payload, {
+            apiKey: llmConfig?.apiKey,
+            model: llmConfig?.model,
+            turbo: turboMode,
+            maxTokens: turboMode ? 512 : (maxTokens || 2048),
+          });
+          break;
+        } catch (llmErr) {
+          const isRateLimit =
+            llmErr.message?.includes('Rate limit') ||
+            llmErr.message?.includes('429') ||
+            llmErr.message?.includes('OTPM') ||
+            llmErr.message?.includes('TPM') ||
+            llmErr.message?.includes('try again in');
+
+          if (isRateLimit && attempt < 3) {
+            const secMatch = llmErr.message.match(/try again in ([\d\.]+)s/i);
+            const waitSec = secMatch ? Math.ceil(parseFloat(secMatch[1])) + 1 : 8;
+
+            for (let s = waitSec; s > 0; s--) {
+              if (!isRunningRef.current) break;
+              onStatus?.({
+                type: 'warning',
+                text: `⏳ Groq Rate Limit reached. Cooling down for ${s}s before solving Q${currentQuestionNum}...`,
+              });
+              await new Promise((r) => setTimeout(r, 1000));
+            }
+
+            if (!isRunningRef.current) break;
+            continue;
+          }
+
+          // Non-rate-limit error (e.g. temporary JSON validation or network hiccup)
+          if (attempt < 3) {
+            console.warn(`[Q${currentQuestionNum}] LLM attempt ${attempt + 1} failed: ${llmErr.message}. Retrying...`);
+            onStatus?.({
+              type: 'warning',
+              text: `⚠️ Q${currentQuestionNum} solver attempt failed (${llmErr.message.slice(0, 45)}...). Retrying...`,
+            });
+            await new Promise((r) => setTimeout(r, 1200));
+            if (!isRunningRef.current) break;
+            continue;
+          }
+
+          // Resilient fallback: If all 4 attempts failed, select Option A / first available option rather than crashing the whole quiz
+          console.warn(`[Q${currentQuestionNum}] All solver attempts failed: ${llmErr.message}. Using safe fallback.`);
+          const fallbackLetter = (q.options?.[0]?.optionLetter || 'A').toUpperCase();
+          solution = {
+            answer: fallbackLetter,
+            confidence: 50,
+            reason: `⚠️ Fallback answer (solver recovery: ${llmErr.message.slice(0, 50)})`,
+          };
+          break;
+        }
+      }
+
+      if (!solution) {
+        const fallbackLetter = (q.options?.[0]?.optionLetter || 'A').toUpperCase();
+        solution = {
+          answer: fallbackLetter,
+          confidence: 50,
+          reason: '⚠️ Fallback answer (solver timed out)',
+        };
+      }
 
       const answerLetter = (solution.answer || '').toUpperCase().trim();
       const targetOpt = (q.options || []).find(

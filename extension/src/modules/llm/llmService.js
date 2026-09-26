@@ -16,7 +16,8 @@ export function formatLlmPayload(question) {
   const optionsMap = {};
   if (Array.isArray(question.options)) {
     question.options.forEach((opt, idx) => {
-      const key = opt.optionLetter || String.fromCharCode(65 + idx);
+      // Guarantee sequential A, B, C, D keys corresponding strictly to option index
+      const key = String.fromCharCode(65 + idx);
       optionsMap[key] = (opt.text || opt.label || '').trim();
     });
   }
@@ -61,6 +62,10 @@ export async function solveMcq(payload, config = {}) {
 
   const tStart = performance.now();
 
+  const effectiveTokens = maxTokens
+    ? parseInt(maxTokens, 10)
+    : (Boolean(turbo) ? 512 : 2048);
+
   const res = await fetch(`${API_BASE_URL}/solve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -70,7 +75,7 @@ export async function solveMcq(payload, config = {}) {
       apiKey: apiKey ? apiKey.trim() : undefined,
       model: model ? model.trim() : undefined,
       turbo: Boolean(turbo),
-      maxTokens: maxTokens ? parseInt(maxTokens, 10) : undefined,
+      maxTokens: effectiveTokens,
     }),
   });
 

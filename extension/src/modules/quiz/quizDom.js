@@ -49,7 +49,15 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
           }
         });
 
-        clone.querySelectorAll('svg, math').forEach((s) => s.remove());
+        clone.querySelectorAll('svg').forEach((s) => s.remove());
+        clone.querySelectorAll('math').forEach((m) => {
+          const mText = (m.getAttribute('alttext') || m.textContent || '').trim();
+          if (mText) {
+            m.parentNode?.replaceChild(document.createTextNode(` ${mText} `), m);
+          } else {
+            m.remove();
+          }
+        });
         return (clone.innerText || clone.textContent || '')
           .replace(/\s+/g, ' ')
           .trim();
@@ -158,43 +166,22 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
             } catch {}
           }
 
-          let badgeLetter = '';
-          if (labelEl) {
-            // Find leaf badge element with single letter A-Z
-            const badgeCandidates = Array.from(
-              labelEl.querySelectorAll(
-                '.kuwkNu, .bIKUCi, [class*="kuwkNu"], [class*="bIKUCi"], [class*="badge" i], [class*="letter" i], div, span, b, strong'
-              )
-            );
-            for (const el of badgeCandidates) {
-              if (el.children.length === 0) {
-                const bTxt = (el.innerText || el.textContent || '').trim();
-                if (/^[A-Z]$/i.test(bTxt)) {
-                  badgeLetter = bTxt.toUpperCase();
-                  break;
-                }
-              }
-            }
-          }
-          if (!badgeLetter) {
-            badgeLetter = String.fromCharCode(65 + rIdx);
-          }
+          // Canonical option letter is strictly A, B, C, D... according to position index
+          const canonicalLetter = String.fromCharCode(65 + rIdx);
 
           if (labelEl) {
             const labelClone = labelEl.cloneNode(true);
             labelClone.querySelectorAll('input[type="radio"], svg').forEach((el) => el.remove());
-            // Strip the badge element itself from clone so it doesn't pollute clean option text
-            const cloneCandidates = Array.from(
-              labelClone.querySelectorAll(
-                '.kuwkNu, .bIKUCi, [class*="kuwkNu"], [class*="bIKUCi"], [class*="badge" i], [class*="letter" i], div, span, b, strong'
-              )
+
+            // Only strip the dedicated badge box (e.g. .kuwkNu, .bIKUCi) that specifically equals canonicalLetter
+            // NEVER strip generic spans or divs which contain code/math variables (e.g. "X" in "X @ theta")
+            const badgeEl = labelClone.querySelector(
+              '.kuwkNu, .bIKUCi, [class*="kuwkNu"], [class*="bIKUCi"], [class*="badge" i], [class*="letter" i]'
             );
-            for (const cEl of cloneCandidates) {
-              if (cEl.children.length === 0 && (cEl.textContent || '').trim().toUpperCase() === badgeLetter) {
-                cEl.remove();
-                break;
-              }
+            if (badgeEl && (badgeEl.textContent || '').trim().toUpperCase() === canonicalLetter) {
+              badgeEl.remove();
             }
+
             labelText = extractCleanMathText(labelClone);
           } else if (radio.parentElement) {
             const parentClone = radio.parentElement.cloneNode(true);
@@ -372,38 +359,35 @@ export async function clickQuizOptionOnPage(tabId, targetDescriptor, optIndex = 
         let target = null;
         let matchedBy = 'none';
 
-        // 1. Strategy 1: Match by visual badge letter within group (Ground truth on Newton School & standard MCQs)
-        if (targetLetter && groupRadios.length > 0) {
+        const letterIndex = targetLetter ? targetLetter.charCodeAt(0) - 65 : -1;
+        const optIdx =
+          typeof desc?.index === 'number' && desc.index >= 0
+            ? desc.index
+            : letterIndex >= 0
+            ? letterIndex
+            : fallbackIndex;
+
+        // 1. Primary Strategy: Match by exact group index (0 = A, 1 = B, 2 = C, 3 = D)
+        // Group radios are strictly in visual top-to-bottom order in the DOM on Newton School
+        if (groupRadios.length > 0 && typeof optIdx === 'number' && optIdx >= 0 && groupRadios[optIdx]) {
+          target = groupRadios[optIdx];
+          matchedBy = `group_index_${optIdx}`;
+        }
+
+        // 2. Secondary Strategy: Match by dedicated badge container element
+        if (!target && targetLetter && groupRadios.length > 0) {
           for (const radio of groupRadios) {
-            const label = radio.closest('label');
+            const label = radio.closest('label') || document.querySelector(`label[for="${CSS.escape(radio.id || '')}"]`);
             if (label) {
-              const candidates = Array.from(label.querySelectorAll('div, span, b, strong, p'));
-              const hasBadge = candidates.some((el) => {
-                const t = (el.innerText || el.textContent || '').trim().toUpperCase();
-                return t === targetLetter && el.children.length === 0;
-              });
-              if (hasBadge) {
+              const badgeEl = label.querySelector(
+                '.kuwkNu, .bIKUCi, [class*="kuwkNu"], [class*="bIKUCi"], [class*="badge" i], [class*="letter" i]'
+              );
+              if (badgeEl && (badgeEl.innerText || badgeEl.textContent || '').trim().toUpperCase() === targetLetter) {
                 target = radio;
                 matchedBy = `badge_letter_${targetLetter}`;
                 break;
               }
             }
-          }
-        }
-
-        // 2. Strategy 2: Match by position index within group (0 = A, 1 = B, 2 = C, 3 = D)
-        if (!target && groupRadios.length > 0) {
-          const letterIndex = targetLetter ? targetLetter.charCodeAt(0) - 65 : -1;
-          const optIdx =
-            typeof desc?.index === 'number' && desc.index >= 0
-              ? desc.index
-              : letterIndex >= 0
-              ? letterIndex
-              : fallbackIndex;
-
-          if (typeof optIdx === 'number' && optIdx >= 0 && groupRadios[optIdx]) {
-            target = groupRadios[optIdx];
-            matchedBy = `group_index_${optIdx}`;
           }
         }
 
@@ -1182,6 +1166,16 @@ export async function handleStartOrInstructionsPage(tabId) {
       target: { tabId },
       world: 'MAIN',
       func: () => {
+        // Auto-check any agreement/consent checkboxes on the instructions page
+        const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]:not(:checked)'));
+        for (const cb of checkboxes) {
+          try {
+            cb.click();
+            cb.checked = true;
+            cb.dispatchEvent(new Event('change', { bubbles: true }));
+          } catch {}
+        }
+
         const startKeywords = [
           'start assessment',
           'attempt assessment',
@@ -1198,19 +1192,37 @@ export async function handleStartOrInstructionsPage(tabId) {
           'attempt now',
           'begin assessment',
           'begin quiz',
+          'launch assessment',
           'attempt',
           'start',
+          'begin',
           'proceed',
           'continue',
         ];
 
         const allButtons = Array.from(
-          document.querySelectorAll('button:not([disabled]), [role="button"]:not([disabled]), a:not([disabled])')
-        );
+          document.querySelectorAll(
+            'button:not([disabled]), [role="button"]:not([disabled]), a:not([disabled]), div[class*="button" i]:not([disabled]), div[class*="btn" i]:not([disabled]), span[class*="button" i]:not([disabled])'
+          )
+        ).filter((btn) => {
+          if (btn.getAttribute('aria-disabled') === 'true') return false;
+          const txt = (btn.innerText || btn.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          if (
+            txt.includes('back') ||
+            txt.includes('download') ||
+            txt.includes('logout') ||
+            txt.includes('cancel') ||
+            txt.includes('close') ||
+            txt.includes('submit')
+          ) {
+            return false;
+          }
+          return true;
+        });
 
         let targetBtn = allButtons.find((btn) => {
-          const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-          return startKeywords.some((kw) => text === kw || (kw.length > 5 && text.includes(kw)));
+          const text = (btn.innerText || btn.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          return startKeywords.some((kw) => text === kw || (kw.length > 4 && text.includes(kw)));
         });
 
         if (!targetBtn) {
@@ -1222,12 +1234,13 @@ export async function handleStartOrInstructionsPage(tabId) {
             pageText.includes('total questions')
           ) {
             targetBtn = allButtons.find((btn) => {
-              const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+              const text = (btn.innerText || btn.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
               return (
                 (text.includes('start') ||
                   text.includes('attempt') ||
                   text.includes('continue') ||
-                  text.includes('resume')) &&
+                  text.includes('resume') ||
+                  text.includes('begin')) &&
                 !text.includes('back') &&
                 !text.includes('download')
               );
@@ -1242,6 +1255,16 @@ export async function handleStartOrInstructionsPage(tabId) {
           } catch {}
 
           let btnClicked = false;
+          const reactPropsKey = Object.keys(targetBtn).find(
+            (k) => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$')
+          );
+          if (reactPropsKey && targetBtn[reactPropsKey]?.onClick) {
+            try {
+              targetBtn[reactPropsKey].onClick({ target: targetBtn, currentTarget: targetBtn, bubbles: true });
+              btnClicked = true;
+            } catch {}
+          }
+
           try {
             if (typeof targetBtn.click === 'function') {
               targetBtn.click();
@@ -1281,15 +1304,18 @@ export async function handleStartOrInstructionsPage(tabId) {
  * Automatically handles instructions / start buttons if encountered during polling.
  *
  * @param {number} tabId
- * @param {number} [timeoutMs=20000]
+ * @param {number} [timeoutMs=30000]
  * @returns {Promise<Object>}
  */
-export async function waitForQuizQuestionsToLoad(tabId, timeoutMs = 20000) {
+export async function waitForQuizQuestionsToLoad(tabId, timeoutMs = 30000) {
   const startTime = Date.now();
 
   while (Date.now() - startTime < timeoutMs) {
     // 1. Check if instructions/start button is on page, and click it
-    await handleStartOrInstructionsPage(tabId);
+    const startRes = await handleStartOrInstructionsPage(tabId);
+    if (startRes?.handled) {
+      await new Promise((r) => setTimeout(r, 1000));
+    }
 
     // 2. Check if radio questions are present in DOM
     try {
