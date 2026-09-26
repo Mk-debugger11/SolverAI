@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "DOM Fetcher (MERN)",
+  "version": "1.0.0",
+  "description": "Captures the DOM of the active webpage and connects with your MERN stack.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "*://my.newtonschool.co/*",
+    "*://*.newtonschool.co/*",
+    "http://localhost:5001/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "index.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

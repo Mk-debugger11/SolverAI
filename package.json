@@ -1,0 +1,21 @@
+{
+  "name": "dom-fetcher-mern-extension",
+  "version": "1.0.0",
+  "description": "Chrome extension to fetch webpage DOM and save to MERN stack",
+  "scripts": {
+    "start:server": "cd backend && npm start",
+    "dev:server": "cd backend && npm run dev",
+    "build:extension": "cd extension && npm run build",
+    "dev:extension": "cd extension && npm run dev",
+    "install:all": "cd backend && npm install && cd ../extension && npm install"
+  },
+  "keywords": [
+    "chrome-extension",
+    "mern",
+    "dom-fetcher",
+    "mongodb",
+    "express",
+    "react",
+    "node"
+  ]
+}
