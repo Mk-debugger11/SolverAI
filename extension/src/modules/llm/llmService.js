@@ -6,11 +6,17 @@ const API_BASE_URL = 'http://localhost:5001/api';
  * @returns {{ q: string, o: Object.<string, string> }}
  */
 export function formatLlmPayload(question) {
-  if (!question) return { q: '', o: {} };
+  if (!question) return { q: '', o: {}, images: [] };
 
   // Use pre-computed llmPayload if available
   if (question.llmPayload && question.llmPayload.q && question.llmPayload.o) {
-    return question.llmPayload;
+    return {
+      q: question.llmPayload.q,
+      o: question.llmPayload.o,
+      images: Array.isArray(question.llmPayload.images)
+        ? question.llmPayload.images
+        : (Array.isArray(question.images) ? question.images : []),
+    };
   }
 
   const optionsMap = {};
@@ -25,6 +31,7 @@ export function formatLlmPayload(question) {
   return {
     q: (question.questionText || question.question || '').trim(),
     o: optionsMap,
+    images: Array.isArray(question.images) ? question.images : [],
   };
 }
 
@@ -45,7 +52,7 @@ export async function fetchLlmConfig() {
 
 /**
  * Executes the LLM MCQ solver endpoint and returns the solution with latency metrics.
- * @param {Object} payload - { q: string, o: Object }
+ * @param {Object} payload - { q: string, o: Object, images?: string[] }
  * @param {Object} [config]
  * @param {string} [config.apiKey]
  * @param {string} [config.model]
@@ -62,9 +69,10 @@ export async function solveMcq(payload, config = {}) {
 
   const tStart = performance.now();
 
+  const hasImages = Array.isArray(payload.images) && payload.images.length > 0;
   const effectiveTokens = maxTokens
     ? parseInt(maxTokens, 10)
-    : (Boolean(turbo) ? 512 : 2048);
+    : (hasImages ? 256 : 180);
 
   const res = await fetch(`${API_BASE_URL}/solve`, {
     method: 'POST',
@@ -72,6 +80,7 @@ export async function solveMcq(payload, config = {}) {
     body: JSON.stringify({
       q: payload.q,
       o: payload.o,
+      images: Array.isArray(payload.images) ? payload.images : [],
       apiKey: apiKey ? apiKey.trim() : undefined,
       model: model ? model.trim() : undefined,
       turbo: Boolean(turbo),

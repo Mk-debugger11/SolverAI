@@ -16,7 +16,7 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
 
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    func: (isLightweight) => {
+    func: async (isLightweight) => {
       const getAttributes = (el) => {
         if (!el || !el.attributes) return {};
         const attrs = {};
@@ -81,7 +81,7 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
       const extractedQuestions = [];
       const parentContainerElements = [];
 
-      Object.entries(groups).forEach(([groupName, radios], gIdx) => {
+      for (const [gIdx, [groupName, radios]] of Object.entries(groups).entries()) {
         if (!radios.length) return;
 
         let commonParent = radios[0].parentElement;
@@ -157,6 +157,112 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
           questionText = `Question ${gIdx + 1}`;
         }
 
+        // Extract diagrams and images inside commonParent (e.g. binary trees, circuits, graphs)
+        const extractedImages = [];
+        try {
+          const imgNodes = Array.from(commonParent.querySelectorAll('img, svg')).filter((node) => {
+            if (node.tagName.toLowerCase() === 'img') {
+              const src = node.currentSrc || node.src || node.getAttribute('src') || '';
+              if (!src) return false;
+              const alt = (node.alt || '').toLowerCase();
+              if (
+                alt.includes('status') ||
+                alt.includes('avatar') ||
+                alt.includes('user') ||
+                alt.includes('logo') ||
+                src.includes('avatar') ||
+                src.includes('profile')
+              ) {
+                return false;
+              }
+              const rect = node.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0 && (rect.width < 35 || rect.height < 35)) {
+                return false;
+              }
+              return true;
+            }
+            if (node.tagName.toLowerCase() === 'svg') {
+              const rect = node.getBoundingClientRect();
+              if (rect.width < 50 || rect.height < 50) return false;
+              return node.querySelectorAll('circle, path, line, rect, text, polygon').length >= 2;
+            }
+            return false;
+          });
+
+          for (const node of imgNodes) {
+            if (node.tagName.toLowerCase() === 'img') {
+              let dataUrl = null;
+              try {
+                const canvas = document.createElement('canvas');
+                let w = node.naturalWidth || node.width || 400;
+                let h = node.naturalHeight || node.height || 400;
+                const maxDim = 500;
+                if (w > maxDim || h > maxDim) {
+                  if (w > h) {
+                    h = Math.round((h * maxDim) / w);
+                    w = maxDim;
+                  } else {
+                    w = Math.round((w * maxDim) / h);
+                    h = maxDim;
+                  }
+                }
+                canvas.width = Math.max(32, w);
+                canvas.height = Math.max(32, h);
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(node, 0, 0, canvas.width, canvas.height);
+                dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+              } catch {
+                const src = node.currentSrc || node.src || '';
+                if (src.startsWith('http') && !src.includes('.svg') && !src.includes('blob:')) {
+                  dataUrl = src;
+                }
+              }
+              if (dataUrl && dataUrl.startsWith('data:image/') && !extractedImages.includes(dataUrl)) {
+                extractedImages.push(dataUrl);
+              }
+            } else if (node.tagName.toLowerCase() === 'svg') {
+              try {
+                const s = new XMLSerializer().serializeToString(node);
+                const blob = new Blob([s], { type: 'image/svg+xml;charset=utf-8' });
+                const blobUrl = URL.createObjectURL(blob);
+                const img = new Image();
+                await new Promise((res) => {
+                  img.onload = () => {
+                    try {
+                      const canvas = document.createElement('canvas');
+                      const rect = node.getBoundingClientRect();
+                      const w = Math.min(500, Math.max(32, Math.round(rect.width || 300)));
+                      const h = Math.min(500, Math.max(32, Math.round(rect.height || 300)));
+                      canvas.width = w;
+                      canvas.height = h;
+                      const ctx = canvas.getContext('2d');
+                      ctx.fillStyle = '#ffffff';
+                      ctx.fillRect(0, 0, w, h);
+                      ctx.drawImage(img, 0, 0, w, h);
+                      const jpeg = canvas.toDataURL('image/jpeg', 0.8);
+                      if (jpeg && !extractedImages.includes(jpeg)) {
+                        extractedImages.push(jpeg);
+                      }
+                    } catch {}
+                    URL.revokeObjectURL(blobUrl);
+                    res();
+                  };
+                  img.onerror = () => {
+                    URL.revokeObjectURL(blobUrl);
+                    res();
+                  };
+                  setTimeout(res, 250);
+                  img.src = blobUrl;
+                });
+              } catch {}
+            }
+          }
+        } catch (imgErr) {
+          console.warn('[Image extraction error]:', imgErr);
+        }
+
         const options = radios.map((radio, rIdx) => {
           let labelText = '';
           let labelEl = radio.closest('label');
@@ -168,6 +274,7 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
 
           // Canonical option letter is strictly A, B, C, D... according to position index
           const canonicalLetter = String.fromCharCode(65 + rIdx);
+          const badgeLetter = canonicalLetter;
 
           if (labelEl) {
             const labelClone = labelEl.cloneNode(true);
@@ -235,7 +342,7 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
 
           return {
             index: rIdx + 1,
-            optionLetter: badgeLetter,
+            optionLetter: canonicalLetter,
             optionId,
             id: radio.id || null,
             name: radio.name || null,
@@ -249,7 +356,7 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
               value: radio.value || null,
               name: radio.name || null,
               text: cleanText,
-              optionLetter: badgeLetter,
+              optionLetter: canonicalLetter,
               index: rIdx,
             },
           };
@@ -268,16 +375,18 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
           questionText,
           groupName,
           options,
+          images: extractedImages,
           llmPayload: {
             q: questionText,
             o: optionsMap,
+            images: extractedImages,
           },
         });
 
         if (commonParent && !parentContainerElements.includes(commonParent)) {
           parentContainerElements.push(commonParent);
         }
-      });
+      }
 
       const onlyRadioContainersHtml = parentContainerElements
         .map((el, i) => `<!-- Group ${i + 1} Container -->\n${el.outerHTML}`)

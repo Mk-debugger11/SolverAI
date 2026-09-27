@@ -19,6 +19,7 @@ router.post('/', async (req, res) => {
     const {
       q,
       o,
+      images,
       apiKey,
       model,
       turbo = true,
@@ -29,6 +30,7 @@ router.post('/', async (req, res) => {
     const result = await solveMcq({
       q,
       o,
+      images: Array.isArray(images) ? images : [],
       apiKey,
       model,
       turbo,

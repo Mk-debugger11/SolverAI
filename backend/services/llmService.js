@@ -5,22 +5,32 @@
 
 /**
  * Robustly extracts a single uppercase option letter (A-D) from raw text, JSON, or reasoning strings.
+ * Avoids false positives from words like "In C...", "C++", "class C", "capacitance C", etc.
  * @param {string} text
  * @returns {string|null}
  */
 function extractOptionLetter(text) {
   if (!text || typeof text !== 'string') return null;
-  // Match JSON key "a": "B" or "answer": "B"
-  const jsonMatch = text.match(/"a"\s*:\s*"([A-D])"/i) || text.match(/"answer"\s*:\s*"([A-D])"/i);
+
+  // 1. Explicit JSON-like key "a": "B", "answer": "B", "option": "B", "choice": "B", "key": "B"
+  const jsonMatch = text.match(/"(?:a|answer|ans|option|choice|key|selected)"\s*:\s*"([A-D])"/i);
   if (jsonMatch) return jsonMatch[1].toUpperCase();
 
-  // Match Option A, Answer B, Choice C, **D**, etc.
-  const optMatch = text.match(/(?:option|answer|choice|key)?\s*[:=\-]?\s*[*_`]*([A-D])[*_`]*(?:\b|[.)\s]|$)/i);
-  if (optMatch) return optMatch[1].toUpperCase();
+  // 2. Clear declarative statements: "**Answer**: B", "Option: B", "The correct answer is B", etc.
+  const statementRegex =
+    /(?:[*_`]*\b(?:the\s+)?(?:correct\s+)?(?:answer|option|choice|final\s+answer)\b[*_`]*)\s*(?:is)?\s*[:=\-]?\s*[*_`]*([A-D])\b/i;
+  const stmtMatch = text.match(statementRegex);
+  if (stmtMatch) return stmtMatch[1].toUpperCase();
 
-  // Standalone single uppercase letter
-  const standalone = text.match(/\b([A-D])\b/);
-  if (standalone) return standalone[1].toUpperCase();
+  // 3. Trailing standalone answer line: e.g. "\nAnswer: B" or "\nB"
+  const trailingMatch = text.match(/(?:^|[\r\n])\s*(?:Answer\s*[:\-]?)?\s*[*_`]*([A-D])[*_`]*\s*$/i);
+  if (trailingMatch) return trailingMatch[1].toUpperCase();
+
+  // 4. Standalone single uppercase letter (strictly A-D, isolated, not part of words or C++)
+  const standaloneMatches = Array.from(text.matchAll(/\b([A-D])\b(?!\+)/g));
+  if (standaloneMatches.length === 1) {
+    return standaloneMatches[0][1].toUpperCase();
+  }
 
   return null;
 }
@@ -40,6 +50,7 @@ function extractOptionLetter(text) {
 async function solveMcq({
   q,
   o,
+  images = [],
   apiKey: clientApiKey,
   model: clientModel,
   turbo = true,
@@ -61,30 +72,69 @@ async function solveMcq({
   let model = (clientModel || process.env.GROQ_MODEL || DEFAULT_MODEL).trim();
   const isTurbo = Boolean(turbo);
 
+  // Only keep valid JPEG, PNG, or WEBP data URLs or non-SVG public URLs
+  const sanitizedImages = (Array.isArray(images) ? images : []).filter((img) => {
+    if (typeof img !== 'string') return false;
+    if (img.startsWith('data:image/jpeg') || img.startsWith('data:image/png') || img.startsWith('data:image/webp')) {
+      return true;
+    }
+    if ((img.startsWith('http://') || img.startsWith('https://')) && !img.includes('.svg') && !img.includes('blob:')) {
+      return true;
+    }
+    return false;
+  });
+  const hasImages = sanitizedImages.length > 0;
+
+  // If images are present, ensure a vision-capable model is used (qwen supports vision, gpt-oss does not)
+  if (hasImages && (model.includes('gpt-oss') || model.includes('allam'))) {
+    console.log(`[Vision Routing] Switching model from ${model} to ${DEFAULT_MODEL} for multimodal image question.`);
+    model = DEFAULT_MODEL;
+  }
+
   // Generous token ceiling to prevent JSON truncation and reasoning-token exhaustion:
   // Models like openai/gpt-oss-120b and qwen require reasoning headroom.
   // Groq only charges for tokens actually produced (stops at closing brace).
   const rawRequestedTokens = Number(clientMaxTokens || process.env.GROQ_MAX_TOKENS);
   const effectiveMaxTokens =
-    Number.isInteger(rawRequestedTokens) && rawRequestedTokens >= 128
+    Number.isInteger(rawRequestedTokens) && rawRequestedTokens >= 64 && rawRequestedTokens <= 512
       ? rawRequestedTokens
-      : (isTurbo ? 512 : 2048);
+      : (hasImages ? 256 : 180);
 
   // Both modes use Chain-of-Thought verification to prevent hallucinations and maximize accuracy:
   // Emitting the derivation thought first ensures the model attends to the question logic before selecting the key.
   const SYSTEM_PROMPT = isTurbo
     ? 'You are an expert assessment solver.\n' +
-      '1. In the "thought" field, write a concise 1-sentence verification/proof of the correct answer.\n' +
+      '1. In the "thought" field, write a concise 1-sentence verification/proof of the correct answer' + (hasImages ? ' referring to the diagram/image' : '') + '.\n' +
       '2. In the "a" field, state strictly the single uppercase option key: "A", "B", "C", or "D".\n' +
+      '3. Evaluate options A, B, C, and D equally without bias towards any letter. Never guess C without proof.\n' +
       'Respond strictly with valid JSON: {"thought": "<1-sentence proof>", "a": "<OptionKey>"}'
     : 'You are an expert multiple-choice assessment solver.\n' +
       'Instructions:\n' +
-      '1. In the "thought" field, briefly derive the solution in 1-2 concise sentences.\n' +
+      '1. In the "thought" field, briefly derive the solution in 1-2 concise sentences' + (hasImages ? ' referring to the diagram/image' : '') + '.\n' +
       '2. In the "a" field, output strictly the single uppercase option key (e.g. "A", "B", "C", or "D").\n' +
+      '3. Evaluate options A, B, C, and D equally without bias towards any letter. Never guess C without proof.\n' +
       'Respond strictly with valid JSON matching:\n' +
       '{"thought": "<Brief derivation>", "a": "<OptionKey>"}';
 
-  const userContent = JSON.stringify({ q, o });
+  // Construct message payload: string for text-only, array with image_url for multimodal
+  let userContent;
+  if (hasImages) {
+    userContent = [
+      {
+        type: 'text',
+        text: `Question: ${q}\n\nOptions:\n${Object.entries(o)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join('\n')}\n\nCarefully inspect the image(s) above to determine the correct option.`,
+      },
+      ...sanitizedImages.slice(0, 3).map((imgUrl) => ({
+        type: 'image_url',
+        image_url: { url: imgUrl },
+      })),
+    ];
+  } else {
+    userContent = JSON.stringify({ q, o });
+  }
+
   const t3Start = Date.now();
 
   let groqRes;
@@ -128,58 +178,31 @@ async function solveMcq({
       errMsg = errText || errMsg;
     }
 
-    // Rate Limit (429) Auto-Cooldown Handler
+    // Rate Limit (429) Handler: Forward directly to client for visible countdown without double-blocking
     if (groqRes.status === 429) {
       const waitMatch = errMsg.match(/try again in ([\d\.]+)s/i);
-      const waitMs = waitMatch ? Math.ceil(parseFloat(waitMatch[1]) * 1000) + 600 : 7500;
-      console.warn(`[Groq Rate Limit 429] OTPM limit exceeded. Cooling down for ${waitMs}ms before automatic retry...`);
-      await new Promise((r) => setTimeout(r, waitMs));
+      const waitSec = waitMatch ? Math.ceil(parseFloat(waitMatch[1])) + 1 : 15;
+      const error = new Error(`Groq rate limit reached (TPM). Please try again in ${waitSec}s.`);
+      error.status = 429;
+      error.retryAfter = waitSec;
+      error.timings = { t3_t4_total_ms };
+      throw error;
+    }
 
-      try {
-        const retryRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: DEFAULT_MODEL,
-            messages: [
-              { role: 'system', content: 'Output strictly JSON: {"a":"<OptionKey>"}' },
-              { role: 'user', content: userContent },
-            ],
-            temperature: 0.0,
-            max_tokens: 512,
-            response_format: { type: 'json_object' },
-          }),
-        });
-
-        if (retryRes.ok) {
-          const retryData = await retryRes.json();
-          const retryRaw = retryData.choices?.[0]?.message?.content || '{}';
-          const match = extractOptionLetter(retryRaw);
-          if (match) {
-            const tBackendRespondedAt = Date.now();
-            return {
-              success: true,
-              answer: match,
-              confidence: 95,
-              reason: '⚡ Solved after rate limit cooldown',
-              modelUsed: DEFAULT_MODEL,
-              turbo: isTurbo,
-              timings: {
-                t3_backend_to_llm_ms: 30,
-                t4_llm_inference_ms: Math.max(10, Date.now() - t3Start - 30),
-                t3_t4_total_ms: Date.now() - t3Start,
-              },
-              serverReceivedAt: tBackendReceivedAt,
-              serverRespondedAt: tBackendRespondedAt,
-            };
-          }
-        }
-      } catch (retryErr) {
-        console.warn('[Groq Rate Limit Retry] Error:', retryErr.message);
-      }
+    // Automatic failover: If Groq rejected image payload (e.g. invalid image data),
+    // immediately solve as text-only question to prevent repeated retries and rate limit exhaustion!
+    if (hasImages && (errMsg.includes('invalid image data') || errMsg.includes('Invalid image') || errMsg.includes('image_url'))) {
+      console.warn('[Vision Fallback] Groq rejected image data. Retrying immediately as text-only question...');
+      return solveMcq({
+        q,
+        o,
+        images: [],
+        apiKey: clientApiKey,
+        model: clientModel,
+        turbo,
+        maxTokens: clientMaxTokens,
+        tBackendReceivedAt,
+      });
     }
 
     // Recovery attempt 1: Check if failed_generation contains the answer key
@@ -322,9 +345,11 @@ async function solveMcq({
     ? (parsed.a ||
         parsed.answer ||
         parsed.ans ||
+        parsed.option ||
+        parsed.choice ||
+        parsed.key ||
         (typeof parsed === 'object' &&
-          Object.values(parsed).find((v) => typeof v === 'string' && /^[A-D]$/i.test(v.trim()))) ||
-        Object.values(parsed)[0])
+          Object.values(parsed).find((v) => typeof v === 'string' && /^[A-D]$/i.test(v.trim()))))
     : '';
 
   // If answerRaw is empty or invalid, fallback to extractOptionLetter directly from rawContent

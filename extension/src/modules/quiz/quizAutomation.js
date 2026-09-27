@@ -108,13 +108,14 @@ export async function runFullQuizAutomation({
       const tSolveStart = performance.now();
       let solution = null;
 
+      let rateLimitCooldownDone = false;
       for (let attempt = 0; attempt < 4; attempt++) {
         try {
           solution = await solveMcq(payload, {
             apiKey: llmConfig?.apiKey,
             model: llmConfig?.model,
             turbo: turboMode,
-            maxTokens: turboMode ? 512 : (maxTokens || 2048),
+            maxTokens: Array.isArray(q.images) && q.images.length > 0 ? 256 : 180,
           });
           break;
         } catch (llmErr) {
@@ -125,26 +126,47 @@ export async function runFullQuizAutomation({
             llmErr.message?.includes('TPM') ||
             llmErr.message?.includes('try again in');
 
-          if (isRateLimit && attempt < 3) {
-            const secMatch = llmErr.message.match(/try again in ([\d\.]+)s/i);
-            const waitSec = secMatch ? Math.ceil(parseFloat(secMatch[1])) + 1 : 8;
+          if (isRateLimit) {
+            // Allow ONE full cooldown per question. If rate limit persists after waiting,
+            // use safe fallback so the assessment is never trapped in an endless timer loop.
+            if (!rateLimitCooldownDone) {
+              rateLimitCooldownDone = true;
+              const secMatch = llmErr.message.match(/try again in ([\d\.]+)s/i);
+              const waitSec = secMatch ? Math.ceil(parseFloat(secMatch[1])) + 1 : 15;
 
-            for (let s = waitSec; s > 0; s--) {
+              for (let s = waitSec; s > 0; s--) {
+                if (!isRunningRef.current) break;
+                onStatus?.({
+                  type: 'warning',
+                  text: `⏳ Groq Rate Limit reached. Cooling down for ${s}s before solving Q${currentQuestionNum}...`,
+                });
+                await new Promise((r) => setTimeout(r, 1000));
+              }
+
               if (!isRunningRef.current) break;
+              continue;
+            } else {
+              console.warn(`[Q${currentQuestionNum}] Rate limit persists after cooldown. Using safe fallback.`);
               onStatus?.({
                 type: 'warning',
-                text: `⏳ Groq Rate Limit reached. Cooling down for ${s}s before solving Q${currentQuestionNum}...`,
+                text: `⚡ Rate limit saturated. Auto-selecting Option A for Q${currentQuestionNum} to prevent blocking.`,
               });
-              await new Promise((r) => setTimeout(r, 1000));
+              const fallbackLetter = (q.options?.[0]?.optionLetter || 'A').toUpperCase();
+              solution = {
+                answer: fallbackLetter,
+                confidence: 50,
+                reason: `⚠️ Safe fallback (Groq TPM rate limit saturated)`,
+              };
+              break;
             }
-
-            if (!isRunningRef.current) break;
-            continue;
           }
 
           // Non-rate-limit error (e.g. temporary JSON validation or network hiccup)
           if (attempt < 3) {
             console.warn(`[Q${currentQuestionNum}] LLM attempt ${attempt + 1} failed: ${llmErr.message}. Retrying...`);
+            if (llmErr.message?.includes('invalid image') || llmErr.message?.includes('image')) {
+              payload.images = [];
+            }
             onStatus?.({
               type: 'warning',
               text: `⚠️ Q${currentQuestionNum} solver attempt failed (${llmErr.message.slice(0, 45)}...). Retrying...`,
@@ -154,7 +176,7 @@ export async function runFullQuizAutomation({
             continue;
           }
 
-          // Resilient fallback: If all 4 attempts failed, select Option A / first available option rather than crashing the whole quiz
+          // Resilient fallback: If all attempts failed, select Option A
           console.warn(`[Q${currentQuestionNum}] All solver attempts failed: ${llmErr.message}. Using safe fallback.`);
           const fallbackLetter = (q.options?.[0]?.optionLetter || 'A').toUpperCase();
           solution = {
