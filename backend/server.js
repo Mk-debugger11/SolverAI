@@ -7,6 +7,7 @@ const { connectDb } = require('./config/db');
 const healthRoutes = require('./routes/healthRoutes');
 const domRoutes = require('./routes/domRoutes');
 const solveRoutes = require('./routes/solveRoutes');
+const assignmentRoutes = require('./routes/assignmentRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -21,6 +22,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/api/health', healthRoutes);
 app.use('/api/dom', domRoutes);
 app.use('/api/solve', solveRoutes);
+app.use('/api/assignments', assignmentRoutes);
 
 // Global Error Handler
 app.use((err, req, res, next) => {

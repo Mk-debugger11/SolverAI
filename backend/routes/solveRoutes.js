@@ -12,27 +12,29 @@ router.get('/config', (req, res) => {
   }
 });
 
-// High-Speed LLM Pipeline: Solves MCQ with Groq
+// Solve a multiple-choice or numerical question using the shared Groq pipeline.
 router.post('/', async (req, res) => {
   const tBackendReceivedAt = Date.now();
   try {
     const {
       q,
       o,
+      answerType,
       apiKey,
       model,
       turbo = true,
       maxTokens,
       max_tokens,
-    } = req.body;
+    } = req.body || {};
 
     const result = await solveMcq({
       q,
       o,
+      answerType,
       apiKey,
       model,
       turbo,
-      maxTokens: maxTokens || max_tokens,
+      maxTokens: maxTokens ?? max_tokens,
       tBackendReceivedAt,
     });
 
