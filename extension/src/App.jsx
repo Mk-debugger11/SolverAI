@@ -6,6 +6,7 @@ import SettingsDrawer from './components/SettingsDrawer';
 import StatusBanner from './components/StatusBanner';
 import PipelineDashboard from './components/PipelineDashboard';
 import HistoryView from './components/HistoryView';
+import { IconCrosshair, IconHistory, IconZap, IconCpu } from './components/Icons';
 
 // Quiz Module
 import {
@@ -151,7 +152,7 @@ export default function App() {
             batchRunningRef.current = false;
             setStatusMessage({
               type: 'success',
-              text: `🎉 Batch Completed! ${msg.completedQuizzes?.length || 0} quizzes solved.`,
+              text: `Batch Completed! ${msg.completedQuizzes?.length || 0} quizzes solved.`,
             });
             handleScanCatalog();
           } else if (msg.type === 'SINGLE_COMPLETE') {
@@ -218,7 +219,7 @@ export default function App() {
       if (info.isCatalog && info.unsolvedCount > 0) {
         setStatusMessage({
           type: 'info',
-          text: `📋 Assessments Catalog: ${info.unsolvedCount} unsolved quiz(zes) pending!`,
+          text: `Assessments Catalog: ${info.unsolvedCount} unsolved quiz(zes) pending!`,
         });
       }
       return info;
@@ -435,15 +436,15 @@ export default function App() {
       if (!clickRes.success) {
         setStatusMessage({
           type: 'error',
-          text: `⚠️ Solved: Option ${answerLetter}, but could NOT select it on webpage!`,
+          text: `Solved: Option ${answerLetter}, but could NOT select it on webpage!`,
           details: clickRes.failureReason,
         });
       } else {
         setStatusMessage({
           type: 'success',
           text: solution.turbo
-            ? `⚡ Turbo Solved & Clicked Option ${answerLetter} in ${timingTracker.total}ms! (LLM: ${timingTracker.t4}ms)`
-            : `⚡ Solved & Clicked Option ${answerLetter} in ${timingTracker.total}ms!`,
+            ? `Turbo Solved & Clicked Option ${answerLetter} in ${timingTracker.total}ms! (LLM: ${timingTracker.t4}ms)`
+            : `Solved & Clicked Option ${answerLetter} in ${timingTracker.total}ms!`,
         });
       }
     } catch (err) {
@@ -510,14 +511,14 @@ export default function App() {
     if (catalogInfo?.isCatalog) {
       setStatusMessage({
         type: 'info',
-        text: '📋 You are on the Assessments Catalog page! Use "Batch Auto-Solve All Unsolved Quizzes" below, or click an assessment card to open it first.',
+        text: 'You are on the Assessments Catalog page! Use "Batch Auto-Solve All Unsolved Quizzes" below, or click an assessment card to open it first.',
       });
     }
 
     setAutoRunning(true);
     autoRunningRef.current = true;
     setAutoSolvedList([]);
-    setStatusMessage({ type: 'info', text: '🚀 Starting Full Quiz Auto-Solve in background...' });
+    setStatusMessage({ type: 'info', text: 'Starting Full Quiz Auto-Solve in background...' });
 
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({
@@ -538,7 +539,7 @@ export default function App() {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({ type: 'STOP_SINGLE_AUTO_SOLVE' });
     }
-    setStatusMessage({ type: 'info', text: '⏹️ Full Quiz Auto-Solve paused.' });
+    setStatusMessage({ type: 'info', text: 'Full Quiz Auto-Solve paused.' });
   };
 
   // Batch Quiz Auto-Solve runner across assessments catalog
@@ -556,7 +557,7 @@ export default function App() {
     setAutoSolvedList([]);
     setStatusMessage({
       type: 'info',
-      text: '🚀 Starting Batch Auto-Solve in background (runs persistently across tabs)...',
+      text: 'Starting Batch Auto-Solve in background (runs persistently across tabs)...',
     });
 
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -580,19 +581,19 @@ export default function App() {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({ type: 'STOP_BATCH_AUTO_SOLVE' });
     }
-    setStatusMessage({ type: 'info', text: '⏹️ Batch Auto-Solve stopped.' });
+    setStatusMessage({ type: 'info', text: 'Batch Auto-Solve stopped.' });
   };
 
   // Manual trigger for Submit Quiz and modal confirmation
   const handleManualSubmitQuiz = async () => {
-    setStatusMessage({ type: 'info', text: '⚡ Submitting quiz on webpage...' });
+    setStatusMessage({ type: 'info', text: 'Submitting quiz on webpage...' });
     const res = await clickSubmitQuizOnPage(activeTab?.id);
     if (res.success) {
       setStatusMessage({
         type: 'success',
         text: res.confirmed
-          ? '🎉 Quiz Submitted & Confirmed Successfully!'
-          : '✓ Submit Quiz clicked on webpage!',
+          ? 'Quiz Submitted & Confirmed Successfully!'
+          : 'Submit Quiz clicked on webpage!',
       });
     } else {
       setStatusMessage({
@@ -637,7 +638,8 @@ export default function App() {
           className={`tab-btn ${view === 'capture' ? 'active' : ''}`}
           onClick={() => setView('capture')}
         >
-          🎯 Quiz & DOM Solver
+          <IconCrosshair size={13} style={{ marginRight: '6px' }} />
+          Quiz & DOM Solver
         </button>
         <button
           className={`tab-btn ${view === 'history' ? 'active' : ''}`}
@@ -646,7 +648,8 @@ export default function App() {
             loadHistory();
           }}
         >
-          🗂️ History ({history.length})
+          <IconHistory size={13} style={{ marginRight: '6px' }} />
+          History ({history.length})
         </button>
       </nav>
 
@@ -668,10 +671,10 @@ export default function App() {
 
             <div className="turbo-toggle-bar">
               <div className="turbo-info">
-                <span className="turbo-flame">{turboMode ? '⚡' : '🧠'}</span>
+                <span className="turbo-flame">{turboMode ? <IconZap size={14} /> : <IconCpu size={14} />}</span>
                 <span className="turbo-title">{turboMode ? 'Turbo Mode' : 'Detailed Mode'}</span>
                 <span className={`turbo-badge ${turboMode ? 'active' : 'detailed'}`}>
-                  {turboMode ? '⚡ Ultra-Fast (~25ms)' : '🧠 Step-by-Step (~150ms)'}
+                  {turboMode ? 'Ultra-Fast (~25ms)' : 'Step-by-Step (~150ms)'}
                 </span>
               </div>
               <button

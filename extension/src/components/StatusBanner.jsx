@@ -1,4 +1,11 @@
 import React from 'react';
+import {
+  IconCheckCircle,
+  IconAlertTriangle,
+  IconInfo,
+  IconFileText,
+  IconX,
+} from './Icons';
 
 /**
  * StatusBanner: Displays notification messages (info, success, error) with optional details.
@@ -9,11 +16,13 @@ export default function StatusBanner({ statusMessage, onClose }) {
   return (
     <div className={`status-banner ${statusMessage.type}`}>
       <span className="status-icon">
-        {statusMessage.type === 'success'
-          ? '✓'
-          : statusMessage.type === 'error'
-          ? '⚠️'
-          : 'ℹ️'}
+        {statusMessage.type === 'success' ? (
+          <IconCheckCircle size={15} />
+        ) : statusMessage.type === 'error' ? (
+          <IconAlertTriangle size={15} />
+        ) : (
+          <IconInfo size={15} />
+        )}
       </span>
       <div className="status-content">
         <span className="status-text">{statusMessage.text}</span>
@@ -25,14 +34,18 @@ export default function StatusBanner({ statusMessage, onClose }) {
               marginTop: '4px',
               opacity: 0.85,
               wordBreak: 'break-word',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
             }}
           >
-            📋 {statusMessage.details}
+            <IconFileText size={12} style={{ flexShrink: 0 }} />
+            <span>{statusMessage.details}</span>
           </div>
         )}
       </div>
       <button className="status-close" onClick={onClose} title="Dismiss">
-        ✕
+        <IconX size={12} />
       </button>
     </div>
   );

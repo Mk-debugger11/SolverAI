@@ -67,7 +67,7 @@ export async function runFullQuizAutomation({
 
       onStatus?.({
         type: 'info',
-        text: `⚡ Solving Question ${currentQuestionNum} of ${totalQuestions}...`,
+        text: `Solving Question ${currentQuestionNum} of ${totalQuestions}...`,
       });
 
       // 2. Extract DOM questions with retry polling to allow React to mount radios
@@ -138,7 +138,7 @@ export async function runFullQuizAutomation({
                 if (!isRunningRef.current) break;
                 onStatus?.({
                   type: 'warning',
-                  text: `⏳ Groq Rate Limit reached. Cooling down for ${s}s before solving Q${currentQuestionNum}...`,
+                  text: `Groq Rate Limit reached. Cooling down for ${s}s before solving Q${currentQuestionNum}...`,
                 });
                 await new Promise((r) => setTimeout(r, 1000));
               }
@@ -149,13 +149,13 @@ export async function runFullQuizAutomation({
               console.warn(`[Q${currentQuestionNum}] Rate limit persists after cooldown. Using safe fallback.`);
               onStatus?.({
                 type: 'warning',
-                text: `⚡ Rate limit saturated. Auto-selecting Option A for Q${currentQuestionNum} to prevent blocking.`,
+                text: `Rate limit saturated. Auto-selecting Option A for Q${currentQuestionNum} to prevent blocking.`,
               });
               const fallbackLetter = (q.options?.[0]?.optionLetter || 'A').toUpperCase();
               solution = {
                 answer: fallbackLetter,
                 confidence: 50,
-                reason: `⚠️ Safe fallback (Groq TPM rate limit saturated)`,
+                reason: `Safe fallback (Groq TPM rate limit saturated)`,
               };
               break;
             }
@@ -169,7 +169,7 @@ export async function runFullQuizAutomation({
             }
             onStatus?.({
               type: 'warning',
-              text: `⚠️ Q${currentQuestionNum} solver attempt failed (${llmErr.message.slice(0, 45)}...). Retrying...`,
+              text: `Q${currentQuestionNum} solver attempt failed (${llmErr.message.slice(0, 45)}...). Retrying...`,
             });
             await new Promise((r) => setTimeout(r, 1200));
             if (!isRunningRef.current) break;
@@ -182,7 +182,7 @@ export async function runFullQuizAutomation({
           solution = {
             answer: fallbackLetter,
             confidence: 50,
-            reason: `⚠️ Fallback answer (solver recovery: ${llmErr.message.slice(0, 50)})`,
+            reason: `Fallback answer (solver recovery: ${llmErr.message.slice(0, 50)})`,
           };
           break;
         }
@@ -193,7 +193,7 @@ export async function runFullQuizAutomation({
         solution = {
           answer: fallbackLetter,
           confidence: 50,
-          reason: '⚠️ Fallback answer (solver timed out)',
+          reason: 'Fallback answer (solver timed out)',
         };
       }
 
@@ -242,7 +242,7 @@ export async function runFullQuizAutomation({
         isRunningRef.current = false;
         onStatus?.({
           type: 'error',
-          text: `🛑 Auto-Solve stopped: Q${currentQuestionNum} (Option ${answerLetter}) could not be selected!`,
+          text: `Auto-Solve stopped: Q${currentQuestionNum} (Option ${answerLetter}) could not be selected!`,
           details: clickResult.failureReason || 'Target radio remained unchecked after selection attempt.',
         });
         break;
@@ -258,7 +258,7 @@ export async function runFullQuizAutomation({
       if (!isLastQuestion && isRunningRef.current) {
         onStatus?.({
           type: 'info',
-          text: `✓ Q${currentQuestionNum} Solved (Option ${answerLetter})! Advancing to Next...`,
+          text: `Q${currentQuestionNum} Solved (Option ${answerLetter})! Advancing to Next...`,
         });
 
         await new Promise((r) => setTimeout(r, stepDelayMs));
@@ -286,7 +286,7 @@ export async function runFullQuizAutomation({
       });
 
       if (autoSubmitAtEnd) {
-        onStatus?.({ type: 'info', text: '⚡ Submitting quiz on webpage...' });
+        onStatus?.({ type: 'info', text: 'Submitting quiz on webpage...' });
         await new Promise((r) => setTimeout(r, 600));
 
         const submitRes = await clickSubmitQuizOnPage(tabId);
@@ -294,19 +294,19 @@ export async function runFullQuizAutomation({
           onStatus?.({
             type: 'success',
             text: submitRes.confirmed
-              ? `🎉 All ${totalQuestions} Questions Solved & Quiz Submitted Successfully!`
-              : `🎉 All ${totalQuestions} Questions Solved & Quiz Submitted!`,
+              ? `All ${totalQuestions} Questions Solved & Quiz Submitted Successfully!`
+              : `All ${totalQuestions} Questions Solved & Quiz Submitted!`,
           });
         } else {
           onStatus?.({
             type: 'success',
-            text: `✓ All ${totalQuestions} Questions Solved! Click "Submit Quiz" on page to finalize.`,
+            text: `All ${totalQuestions} Questions Solved! Click "Submit Quiz" on page to finalize.`,
           });
         }
       } else {
         onStatus?.({
           type: 'success',
-          text: `✓ All ${totalQuestions} Questions Solved! Auto-submit is turned off.`,
+          text: `All ${totalQuestions} Questions Solved! Auto-submit is turned off.`,
         });
       }
     }

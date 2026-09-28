@@ -70,7 +70,7 @@ export async function runBatchQuizAutomation({
         );
         onBatchStatus?.({
           type: 'info',
-          text: '🔄 Navigating to Assessments Catalog (all_assessments)...',
+          text: 'Navigating to Assessments Catalog (all_assessments)...',
         });
         await chrome.tabs.update(tabId, { url: derivedCatalogUrl });
         const loadRes = await waitForCatalogToLoad(tabId, 12000);
@@ -93,14 +93,14 @@ export async function runBatchQuizAutomation({
     if (totalToSolve === 0) {
       onBatchStatus?.({
         type: 'success',
-        text: '🎉 All assessments on this page are already solved! No pending quizzes found.',
+        text: 'All assessments on this page are already solved! No pending quizzes found.',
       });
       return;
     }
 
     onBatchStatus?.({
       type: 'info',
-      text: `🚀 Found ${totalToSolve} unsolved quizzes. Starting Batch Auto-Solve...`,
+      text: `Found ${totalToSolve} unsolved quizzes. Starting Batch Auto-Solve...`,
     });
 
     onBatchProgress?.({
@@ -141,7 +141,7 @@ export async function runBatchQuizAutomation({
 
       onBatchStatus?.({
         type: 'info',
-        text: `📂 Opening Quiz ${quizIndexNum} of ${totalToSolve}: ${quizDisplayTitle}...`,
+        text: `Opening Quiz ${quizIndexNum} of ${totalToSolve}: ${quizDisplayTitle}...`,
       });
 
       onQuizStarted?.({
@@ -256,7 +256,7 @@ export async function runBatchQuizAutomation({
       // 4. Wait for quiz questions or instructions page to load on quizTabId
       onBatchStatus?.({
         type: 'info',
-        text: `⏳ Waiting for quiz questions or start page to load for Quiz ${quizIndexNum}: ${currentQuiz.subject}...`,
+        text: `Waiting for quiz questions or start page to load for Quiz ${quizIndexNum}: ${currentQuiz.subject}...`,
       });
 
       const readyRes = await waitForQuizQuestionsToLoad(quizTabId, 30000);
@@ -265,7 +265,7 @@ export async function runBatchQuizAutomation({
         failedQuizzes.push({ quiz: currentQuiz, error: 'Questions did not load within timeout.' });
         onBatchStatus?.({
           type: 'error',
-          text: `⚠️ Questions did not load for Quiz ${quizIndexNum}: "${currentQuiz.title}". Tab #${quizTabId} is left open for inspection.`,
+          text: `Questions did not load for Quiz ${quizIndexNum}: "${currentQuiz.title}". Tab #${quizTabId} is left open for inspection.`,
         });
 
         // SAFE: Do NOT remove quizTabId. Refocus catalog and proceed
@@ -347,7 +347,7 @@ export async function runBatchQuizAutomation({
       if (!isBatchRunningRef.current) {
         onBatchStatus?.({
           type: 'info',
-          text: '⏹️ Batch Auto-Solve paused by user.',
+          text: 'Batch Auto-Solve paused by user.',
         });
         break;
       }
@@ -365,7 +365,7 @@ export async function runBatchQuizAutomation({
 
         onBatchStatus?.({
           type: 'success',
-          text: `🎉 Solved & Submitted Quiz ${quizIndexNum} of ${totalToSolve}: ${currentQuiz.subject}! Returning to catalog...`,
+          text: `Solved & Submitted Quiz ${quizIndexNum} of ${totalToSolve}: ${currentQuiz.subject}! Returning to catalog...`,
         });
       } else {
         consecutiveQuizFailures++;
@@ -379,13 +379,13 @@ export async function runBatchQuizAutomation({
 
         onBatchStatus?.({
           type: 'error',
-          text: `⚠️ Quiz ${quizIndexNum} encountered an issue (${singleQuizResult.error || 'unsolved'}). Tab #${quizTabId} is left open for review.`,
+          text: `Quiz ${quizIndexNum} encountered an issue (${singleQuizResult.error || 'unsolved'}). Tab #${quizTabId} is left open for review.`,
         });
 
         if (consecutiveQuizFailures >= 3) {
           onBatchStatus?.({
             type: 'error',
-            text: `🛑 Batch Auto-Solve paused: 3 consecutive quizzes encountered errors (${singleQuizResult.error || 'unsolved'}). Please inspect tab #${quizTabId} or check connection.`,
+            text: `Batch Auto-Solve paused: 3 consecutive quizzes encountered errors (${singleQuizResult.error || 'unsolved'}). Please inspect tab #${quizTabId} or check connection.`,
           });
           isBatchRunningRef.current = false;
           break;
@@ -398,7 +398,7 @@ export async function runBatchQuizAutomation({
 
       onBatchStatus?.({
         type: 'info',
-        text: `🔄 Returning to Assessments Catalog...`,
+        text: `Returning to Assessments Catalog...`,
       });
 
       if (openedInNewTab) {
@@ -415,7 +415,7 @@ export async function runBatchQuizAutomation({
           // Quiz was NOT completely solved: LEAVE TAB OPEN so user can inspect!
           onBatchStatus?.({
             type: 'warning',
-            text: `⚠️ Quiz ${quizIndexNum} was not fully submitted. Tab #${quizTabId} is left open for review. Refocusing catalog...`,
+            text: `Quiz ${quizIndexNum} was not fully submitted. Tab #${quizTabId} is left open for review. Refocusing catalog...`,
           });
           try {
             await chrome.tabs.update(tabId, { active: true });
@@ -444,7 +444,7 @@ export async function runBatchQuizAutomation({
 
       onBatchStatus?.({
         type: 'success',
-        text: `🏁 Batch Auto-Solve Complete! Successfully solved ${successfulQuizzes.length} of ${totalToSolve} quizzes.${
+        text: `Batch Auto-Solve Complete! Successfully solved ${successfulQuizzes.length} of ${totalToSolve} quizzes.${
           failedQuizzes.length > 0 ? ` (${failedQuizzes.length} skipped or failed)` : ''
         }`,
       });

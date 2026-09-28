@@ -1,4 +1,5 @@
 import React from 'react';
+import { IconRefresh, IconTrash } from './Icons';
 
 /**
  * Formats bytes to human-readable string.
@@ -24,8 +25,14 @@ export default function HistoryView({
     <main className="content history-view">
       <div className="history-header">
         <span className="card-label">MongoDB Saved Records</span>
-        <button className="btn-refresh" onClick={onRefreshHistory} title="Refresh">
-          🔄 Refresh
+        <button
+          className="btn-refresh"
+          onClick={onRefreshHistory}
+          title="Refresh"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+        >
+          <IconRefresh size={12} />
+          Refresh
         </button>
       </div>
 
@@ -64,7 +71,7 @@ export default function HistoryView({
                 onClick={() => onDeleteRecord(item._id)}
                 title="Delete from MongoDB"
               >
-                🗑
+                <IconTrash size={13} />
               </button>
             </div>
           ))}

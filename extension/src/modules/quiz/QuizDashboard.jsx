@@ -1,4 +1,17 @@
 import React from 'react';
+import {
+  IconBookOpen,
+  IconRefresh,
+  IconPlay,
+  IconSquare,
+  IconLayers,
+  IconZap,
+  IconSearch,
+  IconCheck,
+  IconCheckCircle,
+  IconUpload,
+  IconAlertTriangle,
+} from '../../components/Icons';
 
 /**
  * QuizDashboard component renders automation controls, live progress,
@@ -43,7 +56,7 @@ export default function QuizDashboard({
       {isCatalog && (
         <div className="catalog-info-card">
           <div className="catalog-info-title">
-            <span>📋</span>
+            <IconBookOpen size={14} />
             <span>Assessments Catalog</span>
             <span className="catalog-info-badge">{catalogInfo?.total || 0} Total</span>
             <span className="catalog-info-badge unsolved">{unsolvedCount} Unsolved</span>
@@ -54,8 +67,10 @@ export default function QuizDashboard({
               onClick={onScanCatalog}
               disabled={batchRunning || autoRunning}
               title="Refresh catalog scan"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
             >
-              🔄 Refresh
+              <IconRefresh size={11} />
+              Refresh
             </button>
           )}
         </div>
@@ -72,7 +87,7 @@ export default function QuizDashboard({
             title="Automatically solves Question 1 through N on the currently opened quiz, clicks answers, and submits"
           >
             <div className="btn-full-quiz-content">
-              <span className="btn-quiz-icon">{autoRunning ? '⏹️' : '🚀'}</span>
+              <span className="btn-quiz-icon">{autoRunning ? <IconSquare size={16} /> : <IconPlay size={16} />}</span>
               <div className="btn-quiz-texts">
                 <span className="btn-quiz-title">
                   {autoRunning ? 'Stop Quiz Auto-Solve' : 'Auto-Solve Opened Quiz & Submit'}
@@ -95,7 +110,7 @@ export default function QuizDashboard({
             title="Automatically loops through each unsolved quiz on the catalog, opens it, solves Q1..QN, submits and repeats"
           >
             <div className="btn-batch-quiz-content">
-              <span className="btn-batch-icon">{batchRunning ? '⏹️' : '📚'}</span>
+              <span className="btn-batch-icon">{batchRunning ? <IconSquare size={16} /> : <IconLayers size={16} />}</span>
               <div className="btn-batch-texts">
                 <span className="btn-batch-title">
                   {batchRunning
@@ -120,11 +135,13 @@ export default function QuizDashboard({
               className={`btn btn-solve-pipeline ${turboMode ? 'turbo-glow' : ''}`}
               onClick={onSolveCurrent}
               disabled={solving || loading || autoRunning || batchRunning}
-              title={turboMode ? '⚡ Turbo Mode: Ultra-Fast ~15ms LLM Auto-Solve' : 'Run Fast LLM Pipeline: T1-T6'}
+              title={turboMode ? 'Turbo Mode: Ultra-Fast ~15ms LLM Auto-Solve' : 'Run Fast LLM Pipeline: T1-T6'}
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}
             >
+              <IconZap size={12} />
               {solving
-                ? (turboMode ? '⚡ Turbo Solving...' : '⚡ Running Pipeline...')
-                : (turboMode ? '⚡ Solve Current (<150ms)' : '⚡ Solve Current')}
+                ? (turboMode ? 'Turbo Solving...' : 'Running Pipeline...')
+                : (turboMode ? 'Solve Current (<150ms)' : 'Solve Current')}
             </button>
             <button
               id="fetch-dom-btn"
@@ -132,8 +149,10 @@ export default function QuizDashboard({
               onClick={onInspectDom}
               disabled={loading || solving || autoRunning || batchRunning}
               title="Inspect radio questions in active tab"
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}
             >
-              {loading ? 'Inspecting...' : '🔍 Inspect DOM'}
+              <IconSearch size={12} />
+              {loading ? 'Inspecting...' : 'Inspect DOM'}
             </button>
           </div>
         </div>
@@ -145,7 +164,10 @@ export default function QuizDashboard({
           <div className="quiz-auto-header">
             <div className="quiz-auto-title">
               <span className="batch-pulse-dot"></span>
-              <strong>⚡ Batch Auto-Solving Quizzes...</strong>
+              <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                <IconZap size={13} />
+                Batch Auto-Solving Quizzes...
+              </strong>
             </div>
             <div className="quiz-auto-count">
               Quiz {batchProgress.currentQuizIndex} of {batchProgress.totalQuizzes || 1}
@@ -155,7 +177,7 @@ export default function QuizDashboard({
           {/* Active Quiz Title Badge */}
           {batchProgress.currentQuizTitle && (
             <div className="batch-active-quiz-badge" title={batchProgress.currentQuizTitle}>
-              <span>📖</span>
+              <IconBookOpen size={12} />
               <span>{batchProgress.currentQuizTitle}</span>
             </div>
           )}
@@ -191,15 +213,17 @@ export default function QuizDashboard({
 
           {/* Batch Controls */}
           <div className="quiz-auto-controls">
-            <span style={{ fontSize: '10px', color: '#94a3b8' }}>
-              ✓ Solved {batchCompletedQuizzes.length} quiz(zes) so far
+            <span style={{ fontSize: '10px', color: '#94a3b8', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <IconCheck size={11} /> Solved {batchCompletedQuizzes.length} quiz(zes) so far
             </span>
             <button
               className="btn-pause-sm"
               onClick={onStopBatchAutoSolve}
               title="Stop Batch Automation"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
             >
-              ⏹️ Stop Batch
+              <IconSquare size={10} />
+              Stop Batch
             </button>
           </div>
         </div>
@@ -211,7 +235,10 @@ export default function QuizDashboard({
           <div className="quiz-auto-header">
             <div className="quiz-auto-title">
               <span className={`quiz-pulse-dot ${autoRunning ? 'active' : 'done'}`}></span>
-              <strong>{autoRunning ? '⚡ Auto-Solving Opened Quiz...' : '🎉 Quiz Solved'}</strong>
+              <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                {autoRunning ? <IconZap size={13} /> : <IconCheckCircle size={13} />}
+                {autoRunning ? 'Auto-Solving Opened Quiz...' : 'Quiz Solved'}
+              </strong>
             </div>
             <div className="quiz-auto-count">
               {autoProgress.current > 0 ? `Q ${autoProgress.current}/${autoProgress.total || 8}` : ''}
@@ -242,8 +269,10 @@ export default function QuizDashboard({
                 className="btn-pause-sm"
                 onClick={onStopAutoSolve}
                 title="Pause automation"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
               >
-                ⏹️ Pause
+                <IconSquare size={10} />
+                Pause
               </button>
             ) : (
               <button
@@ -251,8 +280,10 @@ export default function QuizDashboard({
                 onClick={onManualSubmitQuiz}
                 disabled={solving || batchRunning}
                 title="Click Submit Quiz on webpage and confirm modal"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
               >
-                📤 Submit Quiz
+                <IconUpload size={12} />
+                Submit Quiz
               </button>
             )}
           </div>
@@ -263,7 +294,7 @@ export default function QuizDashboard({
               <div
                 key={item.qNum !== undefined ? `q-${item.qNum}-${idx}` : idx}
                 className="quiz-stream-item"
-                title={item.selectionError ? `⚠️ Selection Failed: ${item.selectionError}` : (item.reason ? `Reason: ${item.reason}` : item.question)}
+                title={item.selectionError ? `Selection Failed: ${item.selectionError}` : (item.reason ? `Reason: ${item.reason}` : item.question)}
               >
                 {item.quizSubject && (
                   <span className="stream-quiz-badge">{item.quizSubject}</span>
@@ -273,14 +304,18 @@ export default function QuizDashboard({
                   className="stream-ans-badge"
                   style={item.selected === false ? { background: '#ef4444', color: '#fff' } : undefined}
                 >
-                  Option {item.answer} {item.selected === false ? '⚠️ Failed' : '✓'}
+                  Option {item.answer} {item.selected === false ? (
+                    <IconAlertTriangle size={10} style={{ marginLeft: '3px', verticalAlign: 'middle' }} />
+                  ) : (
+                    <IconCheck size={10} style={{ marginLeft: '3px', verticalAlign: 'middle' }} />
+                  )}
                 </span>
                 <span className="stream-timing-badge">{item.totalTime}ms</span>
                 <span className="stream-text-snippet">
                   {item.reason
                     ? item.reason.length > 35
-                      ? item.reason.slice(0, 35) + '...'
-                      : item.reason
+                    ? item.reason.slice(0, 35) + '...'
+                    : item.reason
                     : item.question.length > 32
                     ? item.question.slice(0, 32) + '...'
                     : item.question}
@@ -304,7 +339,7 @@ export default function QuizDashboard({
               <div
                 key={`batch-q-${idx}`}
                 className="quiz-stream-item"
-                title={item.selectionError ? `⚠️ Selection Failed: ${item.selectionError}` : (item.reason ? `Reason: ${item.reason}` : item.question)}
+                title={item.selectionError ? `Selection Failed: ${item.selectionError}` : (item.reason ? `Reason: ${item.reason}` : item.question)}
               >
                 {item.quizSubject && (
                   <span className="stream-quiz-badge">{item.quizSubject}</span>
@@ -314,14 +349,18 @@ export default function QuizDashboard({
                   className="stream-ans-badge"
                   style={item.selected === false ? { background: '#ef4444', color: '#fff' } : undefined}
                 >
-                  Option {item.answer} {item.selected === false ? '⚠️ Failed' : '✓'}
+                  Option {item.answer} {item.selected === false ? (
+                    <IconAlertTriangle size={10} style={{ marginLeft: '3px', verticalAlign: 'middle' }} />
+                  ) : (
+                    <IconCheck size={10} style={{ marginLeft: '3px', verticalAlign: 'middle' }} />
+                  )}
                 </span>
                 <span className="stream-timing-badge">{item.totalTime}ms</span>
                 <span className="stream-text-snippet">
                   {item.reason
                     ? item.reason.length > 35
-                      ? item.reason.slice(0, 35) + '...'
-                      : item.reason
+                    ? item.reason.slice(0, 35) + '...'
+                    : item.reason
                     : item.question}
                 </span>
               </div>
@@ -332,3 +371,4 @@ export default function QuizDashboard({
     </>
   );
 }
+

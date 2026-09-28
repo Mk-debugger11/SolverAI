@@ -1,7 +1,7 @@
 import { runBatchQuizAutomation } from './modules/quiz/batchQuizAutomation';
 import { runFullQuizAutomation } from './modules/quiz/quizAutomation';
 
-console.log('DOM Fetcher Service Worker loaded and active.');
+console.log('Solver.Ai Service Worker loaded and active.');
 
 // Global background state
 let isBatchRunning = false;
@@ -95,7 +95,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     autoSolvedList = [];
     lastStatusMessage = {
       type: 'info',
-      text: '🚀 Background Batch Auto-Solve starting across assessments catalog...',
+      text: 'Background Batch Auto-Solve starting across assessments catalog...',
     };
 
     startKeepAlive();
@@ -147,7 +147,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         isBatchRunning = false;
         activeBatchRef.current = false;
         stopKeepAlive();
-        updateBadge('✓', '#10b981');
+        updateBadge('DONE', '#10b981');
         broadcast({ type: 'BATCH_COMPLETE', completedQuizzes: batchCompletedQuizzes });
       },
     }).catch((err) => {
@@ -168,7 +168,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     isBatchRunning = false;
     stopKeepAlive();
     clearBadge();
-    lastStatusMessage = { type: 'info', text: '⏹️ Batch Auto-Solve paused.' };
+    lastStatusMessage = { type: 'info', text: 'Batch Auto-Solve paused.' };
     broadcast({ type: 'STATUS_UPDATE', status: lastStatusMessage });
     sendResponse({ stopped: true });
     return true;
@@ -185,7 +185,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     autoSolvedList = [];
     lastStatusMessage = {
       type: 'info',
-      text: '🚀 Starting Full Quiz Auto-Solve in background...',
+      text: 'Starting Full Quiz Auto-Solve in background...',
     };
 
     startKeepAlive();
@@ -228,7 +228,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         isSingleRunning = false;
         activeSingleRef.current = false;
         stopKeepAlive();
-        updateBadge('✓', '#10b981');
+        updateBadge('DONE', '#10b981');
         broadcast({ type: 'SINGLE_COMPLETE', result: res });
       },
     }).catch((err) => {
@@ -249,7 +249,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     isSingleRunning = false;
     stopKeepAlive();
     clearBadge();
-    lastStatusMessage = { type: 'info', text: '⏹️ Quiz Auto-Solve paused.' };
+    lastStatusMessage = { type: 'info', text: 'Quiz Auto-Solve paused.' };
     broadcast({ type: 'STATUS_UPDATE', status: lastStatusMessage });
     sendResponse({ stopped: true });
     return true;

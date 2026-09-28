@@ -1,6 +1,6 @@
-# DOM Fetcher — Chrome Extension (MERN Stack)
+# Solver.Ai — Chrome Extension (MERN Stack)
 
-A lightweight, clean Chrome Extension (Manifest V3) built with the **MERN** stack (**M**ongoDB, **E**xpress, **R**eact, **N**ode.js). It fetches the live DOM of any webpage you are viewing in Chrome, provides instant metrics and preview, and saves it into your MongoDB database.
+An automated LLM multiple-choice quiz solver and DOM extractor Chrome Extension (Manifest V3) built with React, Vite, Express, and Groq Cloud.
 
 ---
 
@@ -68,7 +68,6 @@ The server will start on **`http://localhost:5001`** and connect to MongoDB.
 2. Enable **Developer mode** toggle in the top-right corner.
 3. Click the **Load unpacked** button in the top-left.
 4. Select the **`extension/dist`** folder inside this project directory:
-   `/Users/mukul/Documents/Web Dev Projects/chrome extension/extension/dist`
 5. The **DOM Fetcher (MERN)** extension icon will appear in your extensions bar! Pin it for quick access.
 
 ---

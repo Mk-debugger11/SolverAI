@@ -1,4 +1,5 @@
 import React from 'react';
+import { IconZap, IconInfo } from './Icons';
 
 /**
  * PipelineDashboard: Displays real-time T1-T6 latency flowchart
@@ -12,7 +13,10 @@ export default function PipelineDashboard({ pipelineResult }) {
       <div className="pipeline-header">
         <div className="pipeline-title">
           <span className="pipeline-pulse"></span>
-          <strong>⚡ LLM Pipeline {pipelineResult.status === 'completed' ? 'Completed' : 'Failed'}</strong>
+          <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <IconZap size={13} />
+            LLM Pipeline {pipelineResult.status === 'completed' ? 'Completed' : 'Failed'}
+          </strong>
         </div>
         {pipelineResult.timings?.total > 0 && (
           <div className="pipeline-total-time">
@@ -26,15 +30,18 @@ export default function PipelineDashboard({ pipelineResult }) {
           <div className="pipeline-answer-banner">
             <span className="pipeline-badge-ans">Chosen: Option {pipelineResult.answer}</span>
             {pipelineResult.turbo && (
-              <span className="pipeline-badge-turbo">⚡ TURBO (~{pipelineResult.timings?.t4 || 20}ms)</span>
+              <span className="pipeline-badge-turbo" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <IconZap size={11} /> TURBO (~{pipelineResult.timings?.t4 || 20}ms)
+              </span>
             )}
             <span className="pipeline-badge-conf">{pipelineResult.confidence}% confidence</span>
             <span className="pipeline-badge-model">{pipelineResult.modelUsed}</span>
           </div>
 
           {pipelineResult.reason && (
-            <div className="pipeline-reason">
-              💡 {pipelineResult.reason}
+            <div className="pipeline-reason" style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+              <IconInfo size={13} style={{ flexShrink: 0, marginTop: '2px' }} />
+              <span>{pipelineResult.reason}</span>
             </div>
           )}
 
