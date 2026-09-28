@@ -4,7 +4,7 @@
  */
 
 /**
- * Extracts questions and radio options from the active tab.
+ * Extracts radio and editable numerical questions from the active tab.
  * @param {number} tabId
  * @param {boolean} [lightweight=false]
  * @returns {Promise<Object>} Extracted DOM data including questions array and HTML strings
@@ -17,16 +17,6 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: (isLightweight) => {
-      const getAttributes = (el) => {
-        if (!el || !el.attributes) return {};
-        const attrs = {};
-        for (let i = 0; i < el.attributes.length; i++) {
-          const a = el.attributes[i];
-          attrs[a.name] = a.value;
-        }
-        return attrs;
-      };
-
       // Extract clean text while preserving LaTeX formulas from KaTeX elements
       const extractCleanMathText = (el) => {
         if (!el) return '';
@@ -72,6 +62,7 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
 
       const extractedQuestions = [];
       const parentContainerElements = [];
+      const questionElements = new Map();
 
       Object.entries(groups).forEach(([groupName, radios], gIdx) => {
         if (!radios.length) return;
@@ -223,7 +214,7 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
 
           // Multi-signal detection if this option is already selected on page
           let isSelected = Boolean(radio.checked);
-          if (!isSelected && labelEl) {
+          if (!isLightweight && !isSelected && labelEl) {
             try {
               const bg = window.getComputedStyle(labelEl).backgroundColor || '';
               const border = window.getComputedStyle(labelEl).borderColor || '';
@@ -275,7 +266,8 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
           optionsMap[key] = opt.text;
         });
 
-        extractedQuestions.push({
+        const question = {
+          answerType: 'mcq',
           questionIndex: gIdx + 1,
           questionId,
           questionText,
@@ -285,14 +277,108 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
             q: questionText,
             o: optionsMap,
           },
-        });
+        };
+        extractedQuestions.push(question);
+        questionElements.set(question, questionEl || radios[0]);
 
-        if (commonParent && !parentContainerElements.includes(commonParent)) {
+        if (!isLightweight && commonParent && !parentContainerElements.includes(commonParent)) {
           parentContainerElements.push(commonParent);
         }
       });
 
-      const onlyRadioContainersHtml = parentContainerElements
+      // Numerical fields must belong to a question block. The puzzle marker and
+      // block class are used by Newton's editable revision view as well as quizzes.
+      const numericContainerSelector = '.sc-8f773ddd-5, [data-question-id], [data-testid="question-container"], [data-testid="question"]';
+      const numericHeadingSelector = '.text-span-question-renderer, [class*="text-span-question-renderer"], [data-testid="question-text"], [data-testid="question-stem"]';
+      const normalizeText = (el) => (el?.innerText || el?.textContent || '').replace(/\s+/g, ' ').trim();
+      const isVisible = (el) => Boolean(
+        el && !el.closest('[hidden], [aria-hidden="true"], [inert]') &&
+        el.getClientRects().length &&
+        !['hidden', 'collapse'].includes(window.getComputedStyle(el).visibility)
+      );
+      const isNumericField = (input) => {
+        const type = input.type.toLowerCase();
+        if (!['text', 'number'].includes(type) || input.disabled || input.readOnly || input.matches(':disabled')) return false;
+        const hints = [input.name, input.id, input.placeholder, input.getAttribute('aria-label'), input.autocomplete].join(' ');
+        if (/\b(search|filter|email|username|password|login|phone|tel|otp|one-time-code)\b/i.test(hints)) return false;
+        const numericHint = input.hasAttribute('data-puzzle-answer') || type === 'number' ||
+          ['numeric', 'decimal'].includes(input.inputMode) ||
+          /\b(answer|numeric|numerical|number)\b/i.test(`${hints} ${Array.from(input.labels || []).map(normalizeText).join(' ')}`);
+        return numericHint && isVisible(input);
+      };
+      const elementPath = (el) => {
+        const path = [];
+        while (el && el !== document.body) {
+          const parent = el.parentElement;
+          if (!parent) return null;
+          path.unshift(Array.prototype.indexOf.call(parent.children, el));
+          el = parent;
+        }
+        return el === document.body ? path : null;
+      };
+      const seenNumericContainers = new Set();
+      for (const input of document.querySelectorAll('input[type="number"], input[type="text"], input:not([type])')) {
+        if (!isNumericField(input)) continue;
+        const container = input.closest(numericContainerSelector);
+        if (!container || seenNumericContainers.has(container)) continue;
+        seenNumericContainers.add(container);
+        // A radio question's ancillary text field, or several answer fields, is
+        // ambiguous. Neither is safe to treat as a single numerical answer.
+        if (container.querySelector('input[type="radio"], input[type="checkbox"]')) continue;
+        const fields = Array.from(container.querySelectorAll('input')).filter(isNumericField);
+        if (fields.length !== 1) continue;
+        const headings = Array.from(container.querySelectorAll(numericHeadingSelector))
+          .filter(isVisible)
+          .filter((heading, _index, all) => !all.some((other) => other !== heading && heading.contains(other)));
+        if (headings.length !== 1) continue;
+        const heading = headings[0];
+        const questionText = extractCleanMathText(heading);
+        const inputPath = elementPath(input);
+        const questionPath = elementPath(heading);
+        const containerPath = elementPath(container);
+        if (!questionText || !inputPath || !questionPath || !containerPath) continue;
+        const questionIdentity = [heading.id, heading.getAttribute('data-question-id'), heading.getAttribute('data-id'),
+          container.id, container.getAttribute('data-question-id'), container.getAttribute('data-id')].map((value) => value || '');
+        const questionId = input.id || questionIdentity.find(Boolean) || input.name || `numeric_question_${extractedQuestions.length + 1}`;
+        const inputValue = input.value;
+        const targetDescriptor = {
+          kind: 'numeric',
+          id: input.id || '',
+          name: input.name || '',
+          type: input.type,
+          inputMode: input.inputMode || '',
+          placeholder: input.placeholder || '',
+          puzzleAnswer: input.hasAttribute('data-puzzle-answer'),
+          pageUrl: window.location.href,
+          questionId,
+          questionText,
+          questionDomText: normalizeText(heading),
+          questionIdentity,
+          inputPath,
+          questionPath,
+          containerPath,
+          inputValue,
+        };
+        const question = {
+          answerType: 'numeric', questionId, questionText, options: [], inputValue, targetDescriptor,
+          llmPayload: { q: questionText, answerType: 'numeric' },
+        };
+        extractedQuestions.push(question);
+        questionElements.set(question, heading);
+        if (!isLightweight) parentContainerElements.push(container);
+      }
+
+      // Revision pages can mount a numerical question before several MCQs.
+      // Preserve that order instead of putting all radio groups first.
+      if (extractedQuestions.some((question) => question.answerType === 'numeric')) {
+        extractedQuestions.sort((a, b) => {
+          const position = questionElements.get(a).compareDocumentPosition(questionElements.get(b));
+          return position & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : position & Node.DOCUMENT_POSITION_PRECEDING ? 1 : 0;
+        });
+        extractedQuestions.forEach((question, index) => { question.questionIndex = index + 1; });
+      }
+
+      const onlyRadioContainersHtml = isLightweight ? '' : parentContainerElements
         .map((el, i) => `<!-- Group ${i + 1} Container -->\n${el.outerHTML}`)
         .join('\n\n');
 
@@ -307,6 +393,83 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
   });
 
   return results?.[0]?.result || { fullHtml: '', onlyRadioContainersHtml: '', questions: [], totalQuestionsFound: 0 };
+}
+
+/** Fill one numerical answer only while its question and prior value still match. */
+export async function fillQuizNumericAnswerOnPage(tabId, targetDescriptor, answer) {
+  const numericValue = typeof answer === 'string' || typeof answer === 'number' ? String(answer).trim() : '';
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(numericValue) || !Number.isFinite(Number(numericValue))) {
+    return { success: false, failureReason: 'The answer must be a finite decimal or scientific-notation number.' };
+  }
+  if (typeof chrome === 'undefined' || !chrome.scripting || !tabId || targetDescriptor?.kind !== 'numeric') {
+    return { success: false, failureReason: 'The numerical input or Chrome tab is unavailable.' };
+  }
+
+  try {
+    const current = await extractQuizQuestionsFromPage(tabId, true);
+    const matches = current.questions.filter((question) => question.answerType === 'numeric' &&
+      JSON.stringify(question.targetDescriptor) === JSON.stringify(targetDescriptor));
+    if (matches.length !== 1) {
+      return { success: false, failureReason: 'The numerical question or its input value changed while waiting.' };
+    }
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      args: [targetDescriptor, numericValue],
+      func: async (desc, answerText) => {
+        const failure = (failureReason) => ({ success: false, failureReason });
+        try {
+          const resolvePath = (path) => path.reduce((element, index) => element?.children[index], document.body);
+          const normalizeText = (el) => (el?.innerText || el?.textContent || '').replace(/\s+/g, ' ').trim();
+          const locate = () => {
+            if (window.location.href !== desc.pageUrl) return null;
+            const input = resolvePath(desc.inputPath);
+            const heading = resolvePath(desc.questionPath);
+            const container = resolvePath(desc.containerPath);
+            if (!(input instanceof HTMLInputElement) || !heading || !container ||
+                !container.contains(input) || !container.contains(heading) ||
+                input.disabled || input.readOnly || input.matches(':disabled') ||
+                input.closest('[hidden], [aria-hidden="true"], [inert]') || !input.getClientRects().length ||
+                ['hidden', 'collapse'].includes(window.getComputedStyle(input).visibility)) return null;
+            const identity = [heading.id, heading.getAttribute('data-question-id'), heading.getAttribute('data-id'),
+              container.id, container.getAttribute('data-question-id'), container.getAttribute('data-id')].map((value) => value || '');
+            if (input.id !== desc.id || input.name !== desc.name || input.type !== desc.type ||
+                (input.inputMode || '') !== desc.inputMode || (input.placeholder || '') !== desc.placeholder ||
+                input.hasAttribute('data-puzzle-answer') !== desc.puzzleAnswer ||
+                normalizeText(heading) !== desc.questionDomText || JSON.stringify(identity) !== JSON.stringify(desc.questionIdentity)) return null;
+            return input;
+          };
+          const input = locate();
+          if (!input || input.value !== desc.inputValue) return failure('The numerical question or its input value changed before filling.');
+          // Native number inputs reject a leading +, a leading decimal point,
+          // or a trailing decimal point even though those are valid numbers.
+          const value = input.type === 'number' ? answerText.replace(/^\+/, '').replace(/^(-?)\./, (_match, sign) => `${sign}0.`).replace(/\.(?=[eE]|$)/, '') : answerText;
+          if (input.maxLength >= 0 && value.length > input.maxLength) return failure('The answer exceeds the input length limit.');
+          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+          if (!setter) return failure('The browser does not expose a native input value setter.');
+          input.focus({ preventScroll: true });
+          if (locate() !== input || input.value !== desc.inputValue) return failure('The numerical question or its input changed on focus.');
+          setter.call(input, value);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          input.blur();
+          // React may replace or revert the input after its event handlers run.
+          // Resolve the live element again; never force a value during verification.
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          const liveInput = locate();
+          if (!liveInput || liveInput.value !== value || liveInput.validity?.valid === false) {
+            return failure('The page did not retain the numerical answer after updating.');
+          }
+          return { success: true, value: liveInput.value };
+        } catch (error) {
+          return failure(`Could not fill the numerical answer: ${error.message}`);
+        }
+      },
+    });
+    return results?.[0]?.result || { success: false, failureReason: 'Script execution returned no result.' };
+  } catch (error) {
+    return { success: false, failureReason: `Could not fill the numerical answer: ${error.message}` };
+  }
 }
 
 /**
@@ -551,11 +714,11 @@ export async function getQuizNavigationInfo(tabId) {
 
         const counterEl = Array.from(document.querySelectorAll('div, span, p')).find((el) => {
           const text = (el.innerText || '').trim();
-          return /question\s*\d+\s*[\/|of]\s*\d+/i.test(text) && el.children.length === 0;
+          return /question\s*\d+\s*(?:\/|of)\s*\d+/i.test(text) && el.children.length === 0;
         });
 
         if (counterEl) {
-          const match = (counterEl.innerText || '').match(/question\s*(\d+)\s*[\/|of]\s*(\d+)/i);
+          const match = (counterEl.innerText || '').match(/question\s*(\d+)\s*(?:\/|of)\s*(\d+)/i);
           if (match) {
             currentNum = parseInt(match[1], 10);
             totalNum = parseInt(match[2], 10);
@@ -667,7 +830,7 @@ export async function waitForNextQuestionToRender(tabId, previousQuestionText, c
         let newNum = null;
         const counterEl = Array.from(document.querySelectorAll('div, span, p')).find((el) => {
           const text = (el.innerText || '').trim();
-          return /question\s*\d+\s*[\/|of]\s*\d+/i.test(text) && el.children.length === 0;
+          return /question\s*\d+\s*(?:\/|of)\s*\d+/i.test(text) && el.children.length === 0;
         });
         if (counterEl) {
           const match = (counterEl.innerText || '').match(/question\s*(\d+)/i);
@@ -938,7 +1101,7 @@ export async function detectAssessmentsCatalog(tabId) {
       world: 'MAIN',
       func: () => {
         const currentUrl = window.location.href;
-        const isCatalogUrl = currentUrl.includes('all_assessments') || currentUrl.includes('assessment');
+        const isCatalogUrl = /\/all_assessments\/?$/.test(window.location.pathname);
         const container = document.querySelector(
           '.sc-ccf6239c-13.glpBZc, div.glpBZc, [class*="glpBZc"]'
         );
@@ -1277,7 +1440,7 @@ export async function handleStartOrInstructionsPage(tabId) {
 }
 
 /**
- * Polls until quiz questions with radio options are actually rendered in the DOM.
+ * Polls until radio or editable numerical questions are rendered in the DOM.
  * Automatically handles instructions / start buttons if encountered during polling.
  *
  * @param {number} tabId
@@ -1291,7 +1454,7 @@ export async function waitForQuizQuestionsToLoad(tabId, timeoutMs = 20000) {
     // 1. Check if instructions/start button is on page, and click it
     await handleStartOrInstructionsPage(tabId);
 
-    // 2. Check if radio questions are present in DOM
+    // 2. Check if supported questions are present in DOM
     try {
       const domData = await extractQuizQuestionsFromPage(tabId, true);
       if (domData?.questions?.length > 0) {
@@ -1409,4 +1572,3 @@ export async function waitForCatalogToLoad(tabId, timeoutMs = 10000) {
   }
   return { ready: false, timeout: true };
 }
-

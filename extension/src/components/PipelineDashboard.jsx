@@ -1,8 +1,7 @@
 import React from 'react';
 
 /**
- * PipelineDashboard: Displays real-time T1-T6 latency flowchart
- * and solution breakdown for single question solves.
+ * Displays measured request timing and whether the answer used an API call.
  */
 export default function PipelineDashboard({ pipelineResult }) {
   if (!pipelineResult) return null;
@@ -24,11 +23,12 @@ export default function PipelineDashboard({ pipelineResult }) {
       {pipelineResult.status === 'completed' && (
         <>
           <div className="pipeline-answer-banner">
-            <span className="pipeline-badge-ans">Chosen: Option {pipelineResult.answer}</span>
+            <span className="pipeline-badge-ans">{pipelineResult.answerType === 'numeric' ? 'Filled:' : 'Chosen: Option'} {pipelineResult.answer}</span>
             {pipelineResult.turbo && (
-              <span className="pipeline-badge-turbo">⚡ TURBO (~{pipelineResult.timings?.t4 || 20}ms)</span>
+              <span className="pipeline-badge-turbo">Compact answer</span>
             )}
-            <span className="pipeline-badge-conf">{pipelineResult.confidence}% confidence</span>
+            {pipelineResult.cacheHit && <span className="pipeline-badge-conf">Cached · no API request</span>}
+            {pipelineResult.deduplicated && <span className="pipeline-badge-conf">Shared request</span>}
             <span className="pipeline-badge-model">{pipelineResult.modelUsed}</span>
           </div>
 
@@ -38,35 +38,24 @@ export default function PipelineDashboard({ pipelineResult }) {
             </div>
           )}
 
-          {/* T1 to T6 Timing Grid */}
+          {!pipelineResult.cacheHit && !pipelineResult.deduplicated && Number.isFinite(pipelineResult.usage?.total_tokens) && (
+            <div className="pipeline-reason">Tokens used: {pipelineResult.usage.total_tokens}</div>
+          )}
+
+          {/* Request time includes server queueing, rate-limit waits and inference. */}
           <div className="timing-breakdown-grid">
             <div className="timing-step" title="T1: DOM Extraction from Active Webpage">
-              <span className="step-name">T1: DOM Extract</span>
+              <span className="step-name">DOM extraction</span>
               <span className="step-val">{pipelineResult.timings?.t1 || 0}ms</span>
             </div>
             <div className="timing-arrow">→</div>
-            <div className="timing-step" title="T2: Extension to Backend Network Request">
-              <span className="step-name">T2: Ext → Back</span>
-              <span className="step-val">{pipelineResult.timings?.t2 || 0}ms</span>
+            <div className="timing-step highlight" title="Total backend request time, including pacing and retries">
+              <span className="step-name">Backend request</span>
+              <span className="step-val">{pipelineResult.timings?.requestMs ?? 0}ms</span>
             </div>
             <div className="timing-arrow">→</div>
-            <div className="timing-step" title="T3: Backend to Groq API Network Request">
-              <span className="step-name">T3: Back → LLM</span>
-              <span className="step-val">{pipelineResult.timings?.t3 || 0}ms</span>
-            </div>
-            <div className="timing-arrow">→</div>
-            <div className="timing-step highlight" title="T4: Groq LPU LLM Inference Execution">
-              <span className="step-name">T4: LLM Infer</span>
-              <span className="step-val">{pipelineResult.timings?.t4 || 0}ms</span>
-            </div>
-            <div className="timing-arrow">→</div>
-            <div className="timing-step" title="T5: Backend to Extension Response">
-              <span className="step-name">T5: Back → Ext</span>
-              <span className="step-val">{pipelineResult.timings?.t5 || 0}ms</span>
-            </div>
-            <div className="timing-arrow">→</div>
-            <div className="timing-step" title="T6: Native DOM Click on Webpage Option">
-              <span className="step-name">T6: DOM Click</span>
+            <div className="timing-step" title="Time to fill or select the answer on the webpage">
+              <span className="step-name">Apply answer</span>
               <span className="step-val">{pipelineResult.timings?.t6 || 0}ms</span>
             </div>
           </div>

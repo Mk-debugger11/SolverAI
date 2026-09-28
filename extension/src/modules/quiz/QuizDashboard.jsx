@@ -79,8 +79,8 @@ export default function QuizDashboard({
                 </span>
                 <span className="btn-quiz-subtitle">
                   {autoRunning
-                    ? `Solving Question ${autoProgress.current} of ${autoProgress.total || 8}...`
-                    : 'Solves opened quiz: loops Q1 → Q8, selects answers & submits automatically'}
+                    ? `Solving Question ${autoProgress.current} of ${autoProgress.total || '?'}...`
+                    : 'Answers each question using paced requests and cached answers'}
                 </span>
               </div>
             </div>
@@ -120,18 +120,18 @@ export default function QuizDashboard({
               className={`btn btn-solve-pipeline ${turboMode ? 'turbo-glow' : ''}`}
               onClick={onSolveCurrent}
               disabled={solving || loading || autoRunning || batchRunning}
-              title={turboMode ? '⚡ Turbo Mode: Ultra-Fast ~15ms LLM Auto-Solve' : 'Run Fast LLM Pipeline: T1-T6'}
+              title={turboMode ? 'Solve with a compact answer; API limits may require a wait' : 'Solve with a brief explanation'}
             >
               {solving
                 ? (turboMode ? '⚡ Turbo Solving...' : '⚡ Running Pipeline...')
-                : (turboMode ? '⚡ Solve Current (<150ms)' : '⚡ Solve Current')}
+                : '⚡ Solve Current'}
             </button>
             <button
               id="fetch-dom-btn"
               className="btn btn-secondary"
               onClick={onInspectDom}
               disabled={loading || solving || autoRunning || batchRunning}
-              title="Inspect radio questions in active tab"
+              title="Inspect MCQ and numerical questions in the active tab"
             >
               {loading ? 'Inspecting...' : '🔍 Inspect DOM'}
             </button>
@@ -211,10 +211,10 @@ export default function QuizDashboard({
           <div className="quiz-auto-header">
             <div className="quiz-auto-title">
               <span className={`quiz-pulse-dot ${autoRunning ? 'active' : 'done'}`}></span>
-              <strong>{autoRunning ? '⚡ Auto-Solving Opened Quiz...' : '🎉 Quiz Solved'}</strong>
+              <strong>{autoRunning ? '⚡ Auto-Solving Opened Quiz...' : 'Quiz run results'}</strong>
             </div>
             <div className="quiz-auto-count">
-              {autoProgress.current > 0 ? `Q ${autoProgress.current}/${autoProgress.total || 8}` : ''}
+              {autoProgress.current > 0 ? `Q ${autoProgress.current}/${autoProgress.total || '?'}` : ''}
             </div>
           </div>
 
@@ -273,9 +273,10 @@ export default function QuizDashboard({
                   className="stream-ans-badge"
                   style={item.selected === false ? { background: '#ef4444', color: '#fff' } : undefined}
                 >
-                  Option {item.answer} {item.selected === false ? '⚠️ Failed' : '✓'}
+                  {item.answerType === 'numeric' ? 'Answer' : 'Option'} {item.answer} {item.selected === false ? '⚠️ Failed' : '✓'}
                 </span>
                 <span className="stream-timing-badge">{item.totalTime}ms</span>
+                {item.cacheHit && <span className="stream-timing-badge">Cached</span>}
                 <span className="stream-text-snippet">
                   {item.reason
                     ? item.reason.length > 35
@@ -314,7 +315,7 @@ export default function QuizDashboard({
                   className="stream-ans-badge"
                   style={item.selected === false ? { background: '#ef4444', color: '#fff' } : undefined}
                 >
-                  Option {item.answer} {item.selected === false ? '⚠️ Failed' : '✓'}
+                  {item.answerType === 'numeric' ? 'Answer' : 'Option'} {item.answer} {item.selected === false ? '⚠️ Failed' : '✓'}
                 </span>
                 <span className="stream-timing-badge">{item.totalTime}ms</span>
                 <span className="stream-text-snippet">

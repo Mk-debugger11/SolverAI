@@ -19,7 +19,7 @@ export default function Header({
           <h1>DOM Fetcher</h1>
           {turboMode && <span className="turbo-badge">TURBO</span>}
         </div>
-        <p className="subtitle">Fast LLM MCQ Solver & DOM Extractor</p>
+        <p className="subtitle">Quizzes & assignment workspace</p>
       </div>
 
       <div className="header-right">

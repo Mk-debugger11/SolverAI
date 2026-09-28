@@ -11,16 +11,19 @@ import HistoryView from './components/HistoryView';
 import {
   extractQuizQuestionsFromPage,
   clickQuizOptionOnPage,
+  fillQuizNumericAnswerOnPage,
   clickSubmitQuizOnPage,
   detectAssessmentsCatalog,
 } from './modules/quiz/quizDom';
-import { runFullQuizAutomation } from './modules/quiz/quizAutomation';
-import { runBatchQuizAutomation } from './modules/quiz/batchQuizAutomation';
 import QuizDashboard from './modules/quiz/QuizDashboard';
 import QuizQuestionList from './modules/quiz/QuizQuestionList';
+import AssignmentDashboard from './modules/assignments/AssignmentDashboard';
+import { acquireQuizActionLease } from './modules/assignments/quizActionLease';
+import { getAssignmentWorkerState, sendAssignmentCommand } from './modules/assignments/assignmentMessages';
+import { assertAssignmentPageAction } from './modules/assignments/assignmentPageScope';
 
 // LLM Module & Services
-import { formatLlmPayload, solveMcq, fetchLlmConfig } from './modules/llm/llmService';
+import { formatLlmPayload, solveMcq, fetchLlmConfig, normalizeNumericAnswer } from './modules/llm/llmService';
 import {
   checkBackendHealth,
   saveDomCapture,
@@ -35,6 +38,13 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState(null);
   const [view, setView] = useState('capture'); // 'capture' | 'history'
   const [domSubView, setDomSubView] = useState('questions'); // 'questions' | 'full_dom'
+  const [assignmentJob, setAssignmentJob] = useState(null);
+  const [assignmentBusy, setAssignmentBusy] = useState(false);
+  const [assignmentBatch, setAssignmentBatch] = useState(null);
+  const [assignmentSettings, setAssignmentSettings] = useState(() => ({
+    model: localStorage.getItem('assignment_model') || 'qwen/qwen3.8-27b',
+    maxTokens: localStorage.getItem('assignment_max_tokens') || '4096',
+  }));
 
   // DOM Capture State
   const [capturedDom, setCapturedDom] = useState(null);
@@ -77,6 +87,12 @@ export default function App() {
   const [batchCompletedQuizzes, setBatchCompletedQuizzes] = useState([]);
   const batchRunningRef = useRef(false);
 
+  function acceptAssignmentState(state) {
+    if ('job' in state) setAssignmentJob(state.job || null);
+    if ('busy' in state) setAssignmentBusy(Boolean(state.busy));
+    if ('batch' in state) setAssignmentBatch(state.batch || null);
+  }
+
   // Initialize: Check active tab, sync background automation state, and backend status
   useEffect(() => {
     initActiveTab();
@@ -106,6 +122,8 @@ export default function App() {
 
       // Sync state with background worker
       if (chrome.runtime?.sendMessage) {
+        getAssignmentWorkerState().then(acceptAssignmentState)
+          .catch((error) => setStatusMessage({ type: 'error', text: error.message }));
         chrome.runtime.sendMessage({ type: 'GET_AUTOMATION_STATE' }, (resp) => {
           if (resp) {
             if (resp.isBatchRunning) {
@@ -130,7 +148,12 @@ export default function App() {
 
         const handleRuntimeMessage = (msg) => {
           if (!msg) return;
-          if (msg.type === 'STATUS_UPDATE') {
+          if (msg.type === 'ASSIGNMENT_STATE') {
+            acceptAssignmentState(msg);
+          } else if (msg.type === 'ASSIGNMENT_ACTION_RESULT') {
+            acceptAssignmentState(msg);
+            if (!msg.success) setStatusMessage({ type: 'error', text: msg.error || 'The assignment action failed. Check its recorded state.' });
+          } else if (msg.type === 'STATUS_UPDATE') {
             setStatusMessage(msg.status);
           } else if (msg.type === 'BATCH_PROGRESS_UPDATE') {
             setBatchProgress(msg.progress);
@@ -150,8 +173,8 @@ export default function App() {
             setBatchRunning(false);
             batchRunningRef.current = false;
             setStatusMessage({
-              type: 'success',
-              text: `🎉 Batch Completed! ${msg.completedQuizzes?.length || 0} quizzes solved.`,
+              type: msg.result?.success ? 'success' : msg.result?.cancelled ? 'info' : 'error',
+              text: msg.result?.error || `${msg.result?.cancelled ? 'Batch stopped' : 'Batch finished'}: ${msg.completedQuizzes?.length || 0} quizzes solved${msg.result?.failedQuizzes?.length ? `, ${msg.result.failedQuizzes.length} failed` : ''}.`,
             });
             handleScanCatalog();
           } else if (msg.type === 'SINGLE_COMPLETE') {
@@ -273,7 +296,7 @@ export default function App() {
   // Inspect DOM questions on active webpage
   const handleFetchDom = async () => {
     setLoading(true);
-    setStatusMessage({ type: 'info', text: 'Extracting radio questions and DOM from active tab...' });
+    setStatusMessage({ type: 'info', text: 'Extracting quiz questions and answer fields from the active tab...' });
 
     try {
       const targetTabId = await getFreshActiveTabId();
@@ -285,7 +308,7 @@ export default function App() {
         }
         setStatusMessage({
           type: 'success',
-          text: `Extracted ${data.questions.length} radio question(s) successfully!`,
+          text: `Extracted ${data.questions.length} question(s), including ${data.questions.filter((q) => q.answerType === 'numeric').length} numerical.`,
         });
       }
     } catch (err) {
@@ -359,15 +382,17 @@ export default function App() {
   };
 
   // Fast single question LLM pipeline (T1-T6)
-  const handleRunLlmPipeline = async (questionIndex = 0) => {
-    if (solving) return;
+  const handleRunLlmPipeline = async (inspectedQuestion = null) => {
+    if (solving || autoRunning || batchRunning || assignmentBusy) return;
     setSolving(true);
     setPipelineResult(null);
 
-    const timingTracker = { t1: 0, t2: 0, t3: 0, t4: 0, t5: 0, t6: 0, total: 0 };
+    const timingTracker = { t1: 0, requestMs: 0, t6: 0, total: 0 };
     const pStart = performance.now();
+    let lease;
 
     try {
+      lease = await acquireQuizActionLease();
       const targetTabId = await getFreshActiveTabId();
       // T1: DOM Extraction
       const t1Start = performance.now();
@@ -376,11 +401,21 @@ export default function App() {
       timingTracker.t1 = Math.round(performance.now() - t1Start);
 
       if (!questions.length) {
-        throw new Error('No radio question found on the active page.');
+        throw new Error('No editable MCQ or numerical question found on the active page.');
       }
 
-      const q = questions[questionIndex] || questions[0];
+      const matchingQuestions = inspectedQuestion ? questions.filter((question) =>
+        (question.answerType || 'mcq') === (inspectedQuestion.answerType || 'mcq') &&
+        question.questionId === inspectedQuestion.questionId &&
+        question.groupName === inspectedQuestion.groupName &&
+        JSON.stringify(formatLlmPayload(question)) === JSON.stringify(formatLlmPayload(inspectedQuestion))
+      ) : [questions[0]];
+      if (matchingQuestions.length !== 1) {
+        throw new Error('This question changed or is no longer editable. Inspect DOM again before solving it.');
+      }
+      const q = matchingQuestions[0];
       const payload = formatLlmPayload(q);
+      setStatusMessage({ type: 'info', text: 'Checking cached answers or waiting for the API allowance...' });
 
       // T2-T5: LLM Solver
       const solution = await solveMcq(payload, {
@@ -390,44 +425,59 @@ export default function App() {
         maxTokens: groqMaxTokens,
       });
 
-      timingTracker.t2 = solution.timings.t2_t5_network_ms;
-      timingTracker.t3 = solution.timings.t3_backend_to_llm_ms;
-      timingTracker.t4 = solution.timings.t4_llm_inference_ms;
-      timingTracker.t5 = Math.max(1, Math.round(solution.timings.t2_t5_network_ms * 0.4));
+      timingTracker.requestMs = solution.timings.roundtripMs;
 
-      const answerLetter = (solution.answer || '').toUpperCase().trim();
-      const targetOpt = (q.options || []).find(
-        (o) => (o.optionLetter || '').toUpperCase() === answerLetter
-      ) || (q.options || [])[answerLetter.charCodeAt(0) - 65];
-      const targetOptIndex = targetOpt
-        ? (q.options || []).indexOf(targetOpt)
-        : (answerLetter.charCodeAt(0) - 65);
+      const answerType = q.answerType || 'mcq';
+      const answer = answerType === 'numeric'
+        ? normalizeNumericAnswer(solution.answer)
+        : String(solution.answer ?? '').toUpperCase().trim();
 
-      const clickDescriptor = {
-        ...(targetOpt?.targetDescriptor || {}),
-        optionLetter: answerLetter,
-        name: q.groupName,
-        index: targetOptIndex,
-      };
+      // Rate-limit waits can outlast a manual page change. Recheck before clicking.
+      const latest = await extractQuizQuestionsFromPage(targetTabId, true);
+      const freshQuestion = latest.questions?.find((question) =>
+        (question.answerType || 'mcq') === answerType &&
+        question.questionId === q.questionId &&
+        question.groupName === q.groupName &&
+        JSON.stringify(formatLlmPayload(question)) === JSON.stringify(payload)
+      );
+      if (!freshQuestion) throw new Error('The question changed while waiting. Run Solve Current again.');
+      if (answerType === 'numeric' && freshQuestion.inputValue !== q.inputValue) {
+        throw new Error('The numerical answer was edited while waiting. Your entry was left unchanged.');
+      }
 
       // T6: Click on webpage
+      await lease.check();
       const t6Start = performance.now();
-      const clickRes = await clickQuizOptionOnPage(
-        activeTab?.id,
-        clickDescriptor,
-        targetOptIndex,
-        q.groupName
-      );
+      let clickRes;
+      if (answerType === 'numeric') {
+        clickRes = await fillQuizNumericAnswerOnPage(targetTabId, freshQuestion.targetDescriptor, answer);
+      } else {
+        const targetOptIndex = (freshQuestion.options || []).findIndex(
+          (option) => (option.optionLetter || '').toUpperCase() === answer
+        );
+        if (targetOptIndex < 0) throw new Error('The returned answer does not match an available option.');
+        const targetOpt = freshQuestion.options[targetOptIndex];
+        clickRes = await clickQuizOptionOnPage(targetTabId, {
+          ...targetOpt.targetDescriptor,
+          optionLetter: answer,
+          name: freshQuestion.groupName,
+          index: targetOptIndex,
+        }, targetOptIndex, freshQuestion.groupName);
+      }
       timingTracker.t6 = Math.round(performance.now() - t6Start);
       timingTracker.total = Math.round(performance.now() - pStart);
 
       setPipelineResult({
         status: clickRes.success ? 'completed' : 'error',
-        answer: answerLetter,
+        answer,
+        answerType,
         confidence: solution.confidence,
         reason: solution.reason,
         modelUsed: solution.modelUsed,
         turbo: solution.turbo,
+        cacheHit: solution.cacheHit,
+        deduplicated: solution.deduplicated,
+        usage: solution.usage,
         timings: timingTracker,
         error: clickRes.success ? null : clickRes.failureReason,
       });
@@ -435,28 +485,68 @@ export default function App() {
       if (!clickRes.success) {
         setStatusMessage({
           type: 'error',
-          text: `⚠️ Solved: Option ${answerLetter}, but could NOT select it on webpage!`,
+          text: `The solver returned ${answerType === 'numeric' ? answer : `Option ${answer}`}, but the answer could not be applied.`,
           details: clickRes.failureReason,
         });
       } else {
         setStatusMessage({
           type: 'success',
-          text: solution.turbo
-            ? `⚡ Turbo Solved & Clicked Option ${answerLetter} in ${timingTracker.total}ms! (LLM: ${timingTracker.t4}ms)`
-            : `⚡ Solved & Clicked Option ${answerLetter} in ${timingTracker.total}ms!`,
+          text: `${answerType === 'numeric' ? `Filled numerical answer ${answer}` : `Selected Option ${answer}`}${solution.cacheHit ? ' using a cached answer (no API request)' : solution.deduplicated ? ' using a shared request' : ''}.`,
         });
+        if (answerType === 'numeric') {
+          setCapturedDom((previous) => previous ? {
+            ...previous,
+            questions: previous.questions.map((question) => question.questionId === q.questionId
+              ? { ...question, inputValue: answer } : question),
+          } : previous);
+        }
       }
     } catch (err) {
       console.error('LLM Pipeline Error:', err);
       setStatusMessage({ type: 'error', text: `Pipeline failed: ${err.message}` });
       setPipelineResult({ status: 'error', error: err.message, timings: timingTracker });
     } finally {
+      await lease?.release();
+      setSolving(false);
+    }
+  };
+
+  const handleFillNumericAnswer = async (questionIndex, value) => {
+    if (solving || autoRunning || batchRunning || assignmentBusy) return;
+    const question = capturedDom?.questions?.[questionIndex];
+    if (question?.answerType !== 'numeric') return;
+    setSolving(true);
+    let lease;
+    try {
+      lease = await acquireQuizActionLease();
+      const answer = normalizeNumericAnswer(value);
+      const tabId = await getFreshActiveTabId();
+      const latest = await extractQuizQuestionsFromPage(tabId, true);
+      const current = latest.questions?.find((candidate) =>
+        candidate.answerType === 'numeric' && candidate.questionId === question.questionId &&
+        JSON.stringify(formatLlmPayload(candidate)) === JSON.stringify(formatLlmPayload(question))
+      );
+      if (!current) throw new Error('The question changed. Inspect DOM again before filling an answer.');
+      await lease.check();
+      const result = await fillQuizNumericAnswerOnPage(tabId, current.targetDescriptor, answer);
+      if (!result.success) throw new Error(result.failureReason || 'The numerical field did not retain the answer.');
+      setCapturedDom((previous) => previous ? {
+        ...previous,
+        questions: previous.questions.map((candidate) => candidate.questionId === question.questionId
+          ? { ...candidate, inputValue: answer } : candidate),
+      } : previous);
+      setStatusMessage({ type: 'success', text: `Filled ${answer} on the page. No AI request was used.` });
+    } catch (error) {
+      setStatusMessage({ type: 'error', text: error.message });
+    } finally {
+      await lease?.release();
       setSolving(false);
     }
   };
 
   // Select an option manually by clicking on card
   const handleSelectOption = async (questionIndex, optionIndex) => {
+    if (solving || autoRunning || batchRunning || assignmentBusy) return;
     if (!capturedDom?.questions?.[questionIndex]) return;
     const q = capturedDom.questions[questionIndex];
     const opt = q.options[optionIndex];
@@ -469,17 +559,28 @@ export default function App() {
       index: optionIndex,
     };
 
-    const res = await clickQuizOptionOnPage(
-      activeTab?.id,
-      clickDescriptor,
-      optionIndex,
-      q.groupName
-    );
+    let lease;
+    setSolving(true);
+    try {
+      lease = await acquireQuizActionLease();
+      await lease.check();
+      const res = await clickQuizOptionOnPage(
+        activeTab?.id,
+        clickDescriptor,
+        optionIndex,
+        q.groupName
+      );
 
-    if (res.success) {
-      setStatusMessage({ type: 'success', text: `Selected Option ${opt.optionLetter} on live webpage.` });
-    } else {
-      setStatusMessage({ type: 'error', text: `Selection failed: ${res.failureReason}` });
+      if (res.success) {
+        setStatusMessage({ type: 'success', text: `Selected Option ${opt.optionLetter} on live webpage.` });
+      } else {
+        setStatusMessage({ type: 'error', text: `Selection failed: ${res.failureReason}` });
+      }
+    } catch (error) {
+      setStatusMessage({ type: 'error', text: error.message });
+    } finally {
+      await lease?.release();
+      setSolving(false);
     }
   };
 
@@ -487,7 +588,7 @@ export default function App() {
   const handleSelectOptionB = async (questionIndex = 0) => {
     const q = capturedDom?.questions?.[questionIndex];
     if (!q) {
-      await handleRunLlmPipeline(0);
+      await handleRunLlmPipeline();
       return;
     }
     const optB = (q.options || []).find((o) => (o.optionLetter || '').toUpperCase() === 'B') || q.options[1];
@@ -499,7 +600,7 @@ export default function App() {
 
   // Full Quiz Auto-Solve runner
   const handleStartAutoSolve = async () => {
-    if (autoRunning) return;
+    if (autoRunning || batchRunning || solving || assignmentBusy) return;
     const targetTabId = await getFreshActiveTabId();
     if (!targetTabId) {
       setStatusMessage({ type: 'error', text: 'No active Chrome tab found.' });
@@ -507,11 +608,13 @@ export default function App() {
     }
 
     // Safeguard: If user is on assessments catalog page, advise them on which button to click
-    if (catalogInfo?.isCatalog) {
+    const currentCatalog = await detectAssessmentsCatalog(targetTabId);
+    if (currentCatalog?.isCatalog) {
       setStatusMessage({
         type: 'info',
         text: '📋 You are on the Assessments Catalog page! Use "Batch Auto-Solve All Unsolved Quizzes" below, or click an assessment card to open it first.',
       });
+      return;
     }
 
     setAutoRunning(true);
@@ -528,22 +631,27 @@ export default function App() {
         maxTokens: groqMaxTokens,
         autoSubmitAtEnd,
         stepDelayMs,
+      }, (response) => {
+        if (!response?.started) {
+          setAutoRunning(false);
+          autoRunningRef.current = false;
+          setStatusMessage({ type: 'info', text: chrome.runtime.lastError?.message || response?.reason || 'Could not start the quiz runner.' });
+        }
       });
     }
   };
 
   const handleStopAutoSolve = () => {
     autoRunningRef.current = false;
-    setAutoRunning(false);
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({ type: 'STOP_SINGLE_AUTO_SOLVE' });
     }
-    setStatusMessage({ type: 'info', text: '⏹️ Full Quiz Auto-Solve paused.' });
+    setStatusMessage({ type: 'info', text: 'Stopping quiz; waiting for any pending request to finish.' });
   };
 
   // Batch Quiz Auto-Solve runner across assessments catalog
   const handleStartBatchAutoSolve = async () => {
-    if (batchRunning) return;
+    if (batchRunning || autoRunning || solving || assignmentBusy) return;
     const targetTabId = await getFreshActiveTabId();
     if (!targetTabId) {
       setStatusMessage({ type: 'error', text: 'No active Chrome tab found.' });
@@ -568,6 +676,12 @@ export default function App() {
         maxTokens: groqMaxTokens,
         stepDelayMs,
         quizDelayMs: 2000,
+      }, (response) => {
+        if (!response?.started) {
+          setBatchRunning(false);
+          batchRunningRef.current = false;
+          setStatusMessage({ type: 'info', text: chrome.runtime.lastError?.message || response?.reason || 'Could not start the batch runner.' });
+        }
       });
     }
   };
@@ -575,31 +689,97 @@ export default function App() {
   const handleStopBatchAutoSolve = () => {
     batchRunningRef.current = false;
     autoRunningRef.current = false;
-    setBatchRunning(false);
-    setAutoRunning(false);
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({ type: 'STOP_BATCH_AUTO_SOLVE' });
     }
-    setStatusMessage({ type: 'info', text: '⏹️ Batch Auto-Solve stopped.' });
+    setStatusMessage({ type: 'info', text: 'Stopping batch; waiting for any pending request to finish.' });
   };
 
   // Manual trigger for Submit Quiz and modal confirmation
   const handleManualSubmitQuiz = async () => {
-    setStatusMessage({ type: 'info', text: '⚡ Submitting quiz on webpage...' });
-    const res = await clickSubmitQuizOnPage(activeTab?.id);
-    if (res.success) {
-      setStatusMessage({
-        type: 'success',
-        text: res.confirmed
-          ? '🎉 Quiz Submitted & Confirmed Successfully!'
-          : '✓ Submit Quiz clicked on webpage!',
-      });
-    } else {
-      setStatusMessage({
-        type: 'error',
-        text: `Submit failed: ${res.reason || res.error || 'Submit Quiz button not found'}`,
-      });
+    if (solving || autoRunning || batchRunning || assignmentBusy) return;
+    let lease;
+    setSolving(true);
+    try {
+      lease = await acquireQuizActionLease();
+      await lease.check();
+      setStatusMessage({ type: 'info', text: '⚡ Submitting quiz on webpage...' });
+      const res = await clickSubmitQuizOnPage(activeTab?.id);
+      if (res.success) {
+        setStatusMessage({
+          type: 'success',
+          text: res.confirmed
+            ? '🎉 Quiz Submitted & Confirmed Successfully!'
+            : '✓ Submit Quiz clicked on webpage!',
+        });
+      } else {
+        setStatusMessage({
+          type: 'error',
+          text: `Submit failed: ${res.reason || res.error || 'Submit Quiz button not found'}`,
+        });
+      }
+    } catch (error) {
+      setStatusMessage({ type: 'error', text: error.message });
+    } finally {
+      await lease?.release();
+      setSolving(false);
     }
+  };
+
+  const getAssignmentActionTabId = async (action) => {
+    if (!globalThis.chrome?.tabs?.query) throw new Error('The active Chrome tab could not be identified.');
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!Number.isInteger(tab?.id)) throw new Error('Open a Newton assignment tab before continuing.');
+    setActiveTab(tab);
+    assertAssignmentPageAction(tab.url, action);
+    return tab.id;
+  };
+
+  const handleAssignmentAction = async (action, payload = {}) => {
+    if (!globalThis.chrome?.runtime?.sendMessage) {
+      throw new Error('Load the built extension in Chrome to use assignment actions.');
+    }
+    try {
+      const tabId = ['inspect', 'solve'].includes(action) ? await getAssignmentActionTabId(action) : assignmentJob?.context?.tabId;
+      setStatusMessage(null);
+      const response = await sendAssignmentCommand({
+        scope: 'action', action, onState: acceptAssignmentState,
+        payload: { ...assignmentSettings, ...payload, tabId, apiKey: groqApiKey || undefined },
+      });
+      // An acknowledgement starts work; broadcasts own the changing state.
+      // Applying an early acknowledgement here can overwrite a faster result.
+      if (!response.accepted) acceptAssignmentState(response);
+    } catch (error) {
+      setStatusMessage({ type: 'error', text: error.message });
+      throw error;
+    }
+  };
+
+  const handleAssignmentBatchAction = async (action, payload = {}) => {
+    if (!globalThis.chrome?.runtime?.sendMessage) {
+      throw new Error('Load the built extension in Chrome to use assignment actions.');
+    }
+    try {
+      const tabId = action === 'start' ? await getAssignmentActionTabId(action) : assignmentBatch?.catalogTabId;
+      setStatusMessage(null);
+      const response = await sendAssignmentCommand({
+        scope: 'batch', action, onState: acceptAssignmentState,
+        payload: { ...assignmentSettings, ...payload, tabId, apiKey: groqApiKey || undefined },
+      });
+      if (!response.accepted) acceptAssignmentState(response);
+    } catch (error) {
+      setStatusMessage({ type: 'error', text: error.message });
+      throw error;
+    }
+  };
+
+  const handleAssignmentSettings = (settings) => {
+    setAssignmentSettings((previous) => {
+      const next = { ...previous, ...settings };
+      localStorage.setItem('assignment_model', next.model);
+      localStorage.setItem('assignment_max_tokens', next.maxTokens);
+      return next;
+    });
   };
 
   const getOptionB = (q) =>
@@ -637,7 +817,10 @@ export default function App() {
           className={`tab-btn ${view === 'capture' ? 'active' : ''}`}
           onClick={() => setView('capture')}
         >
-          🎯 Quiz & DOM Solver
+          Quizzes
+        </button>
+        <button className={`tab-btn ${view === 'assignments' ? 'active' : ''}`} onClick={() => setView('assignments')}>
+          Assignments
         </button>
         <button
           className={`tab-btn ${view === 'history' ? 'active' : ''}`}
@@ -646,12 +829,18 @@ export default function App() {
             loadHistory();
           }}
         >
-          🗂️ History ({history.length})
+          History ({history.length})
         </button>
       </nav>
 
       {/* Status Notifications */}
       <StatusBanner statusMessage={statusMessage} onClose={() => setStatusMessage(null)} />
+
+      {view === 'assignments' && (
+        <AssignmentDashboard job={assignmentJob} batch={assignmentBatch} activeTabUrl={activeTab?.url} operationBusy={assignmentBusy} busy={assignmentBusy || solving || autoRunning || batchRunning}
+          settings={assignmentSettings} onSettingsChange={handleAssignmentSettings} onAction={handleAssignmentAction}
+          onBatchAction={handleAssignmentBatchAction} />
+      )}
 
       {/* Quiz & DOM Solver View */}
       {view === 'capture' && (
@@ -671,14 +860,14 @@ export default function App() {
                 <span className="turbo-flame">{turboMode ? '⚡' : '🧠'}</span>
                 <span className="turbo-title">{turboMode ? 'Turbo Mode' : 'Detailed Mode'}</span>
                 <span className={`turbo-badge ${turboMode ? 'active' : 'detailed'}`}>
-                  {turboMode ? '⚡ Ultra-Fast (~25ms)' : '🧠 Step-by-Step (~150ms)'}
+                  {turboMode ? 'Compact answer' : 'Brief explanation'}
                 </span>
               </div>
               <button
                 type="button"
                 className={`toggle-switch-btn ${turboMode ? 'active' : ''}`}
                 onClick={toggleTurboMode}
-                title="Toggle between Ultra-Fast Turbo (1-token) and Detailed Reasoning"
+                title="Toggle between compact answers and answers with a brief explanation"
               >
                 <span className="toggle-switch-thumb"></span>
               </button>
@@ -692,11 +881,11 @@ export default function App() {
             autoSolvedList={autoSolvedList}
             autoSubmitAtEnd={autoSubmitAtEnd}
             turboMode={turboMode}
-            solving={solving}
+            solving={solving || assignmentBusy}
             loading={loading}
             onStartAutoSolve={handleStartAutoSolve}
             onStopAutoSolve={handleStopAutoSolve}
-            onSolveCurrent={() => handleRunLlmPipeline(0)}
+            onSolveCurrent={() => handleRunLlmPipeline()}
             onInspectDom={handleFetchDom}
             onToggleAutoSubmit={toggleAutoSubmitAtEnd}
             onManualSubmitQuiz={handleManualSubmitQuiz}
@@ -718,7 +907,7 @@ export default function App() {
             domSubView={domSubView}
             setDomSubView={setDomSubView}
             turboMode={turboMode}
-            solving={solving}
+            solving={solving || autoRunning || batchRunning || assignmentBusy}
             saving={saving}
             copiedType={copiedType}
             copyToClipboard={copyToClipboard}
@@ -726,6 +915,7 @@ export default function App() {
             onSelectOptionB={handleSelectOptionB}
             onSelectOption={handleSelectOption}
             onSolveQuestion={handleRunLlmPipeline}
+            onFillNumericAnswer={handleFillNumericAnswer}
             getLlmPayload={formatLlmPayload}
             getOptionB={getOptionB}
           />

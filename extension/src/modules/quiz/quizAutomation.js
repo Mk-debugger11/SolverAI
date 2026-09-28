@@ -1,16 +1,39 @@
 import {
   extractQuizQuestionsFromPage,
   clickQuizOptionOnPage,
+  fillQuizNumericAnswerOnPage,
   getQuizNavigationInfo,
   clickNextQuestionOnPage,
   waitForNextQuestionToRender,
   clickSubmitQuizOnPage,
 } from './quizDom';
-import { formatLlmPayload, solveMcq } from '../llm/llmService';
+import { formatLlmPayload, normalizeNumericAnswer, solveMcq } from '../llm/llmService';
+
+const isQuestionNumber = (value) => Number.isInteger(value) && value > 0;
+const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+
+function questionIdentity(question) {
+  const payload = formatLlmPayload(question);
+  const answerType = payload.answerType || 'mcq';
+  return JSON.stringify({
+    answerType,
+    id: question.questionId || null,
+    group: question.groupName || null,
+    text: normalizeText(payload.q),
+    options: Object.entries(payload.o || {}).sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => [key, normalizeText(value)]),
+    // Numeric controls have no choices to anchor the answer to. Match the
+    // control's stable context; its editable value is checked separately.
+    input: answerType === 'numeric'
+      ? Object.entries(question.targetDescriptor || {}).filter(([key]) => key !== 'inputValue')
+        .sort(([a], [b]) => a.localeCompare(b))
+      : null,
+  });
+}
 
 /**
  * Orchestrates full quiz auto-solve: loops through questions, solves via LLM,
- * clicks target option, advances to Next, and automatically submits quiz at the end.
+ * selects or fills the answer, advances to Next, and optionally submits at the end.
  *
  * @param {Object} options
  * @param {number} options.tabId
@@ -38,41 +61,41 @@ export async function runFullQuizAutomation({
   onQuestionSolved,
   onComplete,
 }) {
-  if (!tabId) {
-    onStatus?.({ type: 'error', text: 'No active Chrome tab found.' });
-    return;
-  }
-
   let currentQuestionNum = 1;
-  let totalQuestions = 8;
-  let consecutiveStuckCount = 0;
-  let lastQuestionText = '';
+  let totalQuestions = null;
+  let lastQuestionIdentity = null;
   let solvedQuestionsCount = 0;
   let automationError = null;
+  let reachedEnd = false;
+  let completed = false;
 
   try {
+    if (!tabId) throw new Error('No active Chrome tab found.');
+
     while (isRunningRef.current) {
       // 1. Check live quiz navigation on page
       const navInfo = await getQuizNavigationInfo(tabId);
       if (navInfo) {
-        if (navInfo.currentNum) currentQuestionNum = navInfo.currentNum;
-        if (navInfo.totalNum) totalQuestions = navInfo.totalNum;
+        if (isQuestionNumber(navInfo.currentNum)) currentQuestionNum = navInfo.currentNum;
+        if (isQuestionNumber(navInfo.totalNum)) totalQuestions = navInfo.totalNum;
       }
+      if (!isRunningRef.current) break;
 
       onProgress?.({
         current: currentQuestionNum,
         total: totalQuestions,
-        percentage: Math.round(((currentQuestionNum - 1) / totalQuestions) * 100),
+        percentage: totalQuestions ? Math.round(((currentQuestionNum - 1) / totalQuestions) * 100) : 0,
       });
 
       onStatus?.({
         type: 'info',
-        text: `⚡ Solving Question ${currentQuestionNum} of ${totalQuestions}...`,
+        text: `Solving Question ${currentQuestionNum}${totalQuestions ? ` of ${totalQuestions}` : ''}. The backend checks its cache and waits for API capacity if needed.`,
       });
 
-      // 2. Extract DOM questions with retry polling to allow React to mount radios
+      // 2. Wait for React to mount the question and its answer controls.
       let questions = [];
       for (let attempt = 0; attempt < 20; attempt++) {
+        if (!isRunningRef.current) break;
         const domData = await extractQuizQuestionsFromPage(tabId, true);
         if (domData?.questions?.length > 0) {
           questions = domData.questions;
@@ -81,28 +104,26 @@ export async function runFullQuizAutomation({
         await new Promise((r) => setTimeout(r, 400));
         if (!isRunningRef.current) break;
       }
+      if (!isRunningRef.current) break;
 
       if (!questions.length) {
-        throw new Error(`Could not find radio question on Question ${currentQuestionNum}.`);
+        throw new Error(`Could not find an answerable question on Question ${currentQuestionNum}.`);
+      }
+      if (questions.length > 1 && !navInfo?.hasNext && !navInfo?.hasSubmit) {
+        throw new Error('This page displays several questions together without quiz navigation. Use Inspect DOM, then Solve on an individual question card.');
       }
 
       const q = questions[0];
-      const currentQText = (q.questionText || '').replace(/\s+/g, ' ').trim();
+      const currentQText = normalizeText(q.questionText);
+      const identity = questionIdentity(q);
 
-      // Stuck detection safeguard
-      if (currentQText && currentQText === lastQuestionText) {
-        consecutiveStuckCount++;
-        if (consecutiveStuckCount >= 2) {
-          throw new Error(
-            `Repeatedly stuck on Question ${currentQuestionNum}. Next button did not advance the question.`
-          );
-        }
-      } else {
-        consecutiveStuckCount = 0;
-        lastQuestionText = currentQText;
+      // Avoid spending another request if Next did not change the question.
+      if (identity === lastQuestionIdentity) {
+        throw new Error('Next did not advance past the previous question. Auto-Solve stopped before requesting it again.');
       }
 
       const payload = formatLlmPayload(q);
+      const answerType = payload.answerType || 'mcq';
 
       // 3. Query LLM Solver
       const tSolveStart = performance.now();
@@ -112,69 +133,95 @@ export async function runFullQuizAutomation({
         turbo: turboMode,
         maxTokens,
       });
+      if (!isRunningRef.current) break;
 
-      const answerLetter = (solution.answer || '').toUpperCase().trim();
-      const targetOpt = (q.options || []).find(
-        (o) => (o.optionLetter || '').toUpperCase() === answerLetter
-      ) || (q.options || [])[answerLetter.charCodeAt(0) - 65];
-      const targetOptIndex = targetOpt
-        ? (q.options || []).indexOf(targetOpt)
-        : (answerLetter.charCodeAt(0) - 65);
+      const answer = answerType === 'numeric'
+        ? normalizeNumericAnswer(solution.answer)
+        : String(solution.answer ?? '').toUpperCase().trim();
+      if (answerType === 'mcq' && !Object.hasOwn(payload.o, answer)) {
+        throw new Error(`The solver returned an invalid option for Question ${currentQuestionNum}.`);
+      }
 
-      const clickDescriptor = {
-        ...(targetOpt?.targetDescriptor || {}),
-        optionLetter: answerLetter,
-        name: q.groupName,
-        index: targetOptIndex,
-      };
+      // A paced request can take a while. Confirm that the page still shows
+      // the same question and choices, and use its latest input descriptors.
+      const freshData = await extractQuizQuestionsFromPage(tabId, true);
+      if (!isRunningRef.current) break;
+      const freshQuestion = freshData?.questions?.[0];
+      const inputChanged = answerType === 'numeric' &&
+        String(freshQuestion?.inputValue ?? freshQuestion?.targetDescriptor?.inputValue ?? '') !==
+        String(q.inputValue ?? q.targetDescriptor?.inputValue ?? '');
+      if (!freshQuestion || questionIdentity(freshQuestion) !== identity || inputChanged) {
+        throw new Error('The question or options changed, or the input was edited while waiting. No answer was applied.');
+      }
 
-      // 4. Click target option on webpage
-      const clickResult = await clickQuizOptionOnPage(
-        tabId,
-        clickDescriptor,
-        targetOptIndex,
-        q.groupName
-      );
+      // 4. Apply the answer using the current page's matching control.
+      let applyResult;
+      if (answerType === 'numeric') {
+        if (!freshQuestion.targetDescriptor) {
+          throw new Error(`Could not identify the numeric input for Question ${currentQuestionNum}.`);
+        }
+        applyResult = await fillQuizNumericAnswerOnPage(tabId, freshQuestion.targetDescriptor, answer);
+      } else {
+        const targetOptIndex = (freshQuestion.options || []).findIndex(
+          (option, index) => (option.optionLetter || String.fromCharCode(65 + index)).toUpperCase() === answer
+        );
+        if (targetOptIndex < 0) {
+          throw new Error(`Option ${answer} is not present on Question ${currentQuestionNum}.`);
+        }
+        const targetOpt = freshQuestion.options[targetOptIndex];
+        const clickDescriptor = {
+          ...(targetOpt.targetDescriptor || {}),
+          optionLetter: answer,
+          name: freshQuestion.groupName,
+          index: targetOptIndex,
+        };
+        applyResult = await clickQuizOptionOnPage(tabId, clickDescriptor, targetOptIndex, freshQuestion.groupName);
+      }
 
       const tTotal = Math.round(performance.now() - tSolveStart);
-      if (clickResult.success) {
+      if (applyResult?.success) {
         solvedQuestionsCount++;
       }
 
       const record = {
         qNum: currentQuestionNum,
         question: (q.questionText || '').slice(0, 50),
-        answer: answerLetter,
+        answer,
+        answerType,
         reason: solution.reason,
+        cacheHit: solution.cacheHit,
+        deduplicated: solution.deduplicated,
+        usage: solution.usage,
         totalTime: tTotal,
-        selected: clickResult.success,
-        selectionError: clickResult.success ? null : clickResult.failureReason || 'Radio remained unchecked',
+        selected: Boolean(applyResult?.success),
+        selectionError: applyResult?.success ? null : applyResult?.failureReason || 'The answer could not be applied',
       };
 
       onQuestionSolved?.(record);
 
-      // Stop immediately if option could not be selected
-      if (!clickResult.success) {
-        isRunningRef.current = false;
-        onStatus?.({
-          type: 'error',
-          text: `🛑 Auto-Solve stopped: Q${currentQuestionNum} (Option ${answerLetter}) could not be selected!`,
-          details: clickResult.failureReason || 'Target radio remained unchecked after selection attempt.',
-        });
-        break;
+      if (!applyResult?.success) {
+        throw new Error(`Q${currentQuestionNum}: ${answerType === 'numeric' ? 'answer' : 'Option'} ${answer} could not be applied: ${applyResult?.failureReason || 'Answer control did not update'}.`);
       }
+      if (!isRunningRef.current) break;
+      lastQuestionIdentity = identity;
 
       // Check if there are further questions
       const currentNav = await getQuizNavigationInfo(tabId);
-      const isLastQuestion =
-        (currentNav && !currentNav.hasNext) ||
-        currentQuestionNum >= totalQuestions ||
-        (currentNav && currentNav.currentNum >= currentNav.totalNum);
+      if (!isRunningRef.current) break;
+      if (isQuestionNumber(currentNav?.totalNum)) totalQuestions = currentNav.totalNum;
+      const visibleQuestionNum = isQuestionNumber(currentNav?.currentNum)
+        ? currentNav.currentNum : currentQuestionNum;
+      const isLastQuestion = totalQuestions !== null
+        ? visibleQuestionNum >= totalQuestions
+        : currentNav?.hasNext === false && currentNav?.hasSubmit === true;
 
-      if (!isLastQuestion && isRunningRef.current) {
+      if (!isLastQuestion) {
+        if (!currentNav?.hasNext) {
+          throw new Error(`Could not confirm the end of the quiz or find Next after Question ${currentQuestionNum}.`);
+        }
         onStatus?.({
           type: 'info',
-          text: `✓ Q${currentQuestionNum} Solved (Option ${answerLetter})! Advancing to Next...`,
+          text: `Q${currentQuestionNum}: ${answerType === 'numeric' ? `entered ${answer}` : `selected Option ${answer}`}${solution.cacheHit ? ' using a cached answer (no API request)' : solution.deduplicated ? ' using a shared request' : ''}. Advancing to Next...`,
         });
 
         await new Promise((r) => setTimeout(r, stepDelayMs));
@@ -185,16 +232,19 @@ export async function runFullQuizAutomation({
           throw new Error(`Failed to click "Next" button after Question ${currentQuestionNum}.`);
         }
 
-        await waitForNextQuestionToRender(tabId, currentQText, currentQuestionNum);
+        const rendered = await waitForNextQuestionToRender(tabId, currentQText, currentQuestionNum);
+        if (!isRunningRef.current) break;
+        if (rendered === false) throw new Error('The next question did not finish loading.');
         currentQuestionNum++;
       } else {
-        // Final question answered!
+        reachedEnd = true;
+        totalQuestions ??= currentQuestionNum;
         break;
       }
     }
 
     // 5. Post-Quiz Completion: Submit Quiz
-    if (isRunningRef.current) {
+    if (reachedEnd && isRunningRef.current) {
       onProgress?.({
         current: totalQuestions,
         total: totalQuestions,
@@ -204,9 +254,11 @@ export async function runFullQuizAutomation({
       if (autoSubmitAtEnd) {
         onStatus?.({ type: 'info', text: '⚡ Submitting quiz on webpage...' });
         await new Promise((r) => setTimeout(r, 600));
+        if (!isRunningRef.current) return;
 
         const submitRes = await clickSubmitQuizOnPage(tabId);
-        if (submitRes.success) {
+        if (!isRunningRef.current) return;
+        if (submitRes?.success) {
           onStatus?.({
             type: 'success',
             text: submitRes.confirmed
@@ -214,10 +266,7 @@ export async function runFullQuizAutomation({
               : `🎉 All ${totalQuestions} Questions Solved & Quiz Submitted!`,
           });
         } else {
-          onStatus?.({
-            type: 'success',
-            text: `✓ All ${totalQuestions} Questions Solved! Click "Submit Quiz" on page to finalize.`,
-          });
+          throw new Error(`Answers were applied, but the quiz could not be submitted: ${submitRes?.reason || 'Submit failed'}.`);
         }
       } else {
         onStatus?.({
@@ -225,6 +274,7 @@ export async function runFullQuizAutomation({
           text: `✓ All ${totalQuestions} Questions Solved! Auto-submit is turned off.`,
         });
       }
+      completed = true;
     }
   } catch (err) {
     automationError = err;
@@ -234,11 +284,15 @@ export async function runFullQuizAutomation({
       text: `Auto-Solve interrupted: ${err.message}`,
     });
   } finally {
+    const cancelled = !automationError && !isRunningRef.current;
+    if (cancelled) onStatus?.({ type: 'info', text: 'Auto-Solve stopped.' });
     isRunningRef.current = false;
     onComplete?.({
-      success: !automationError && solvedQuestionsCount > 0,
+      success: completed && !automationError && !cancelled,
+      cancelled,
       solvedCount: solvedQuestionsCount,
       error: automationError ? automationError.message : null,
+      errorStatus: automationError?.status ?? null,
     });
   }
 }

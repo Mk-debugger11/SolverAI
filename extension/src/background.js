@@ -1,5 +1,12 @@
 import { runBatchQuizAutomation } from './modules/quiz/batchQuizAutomation';
 import { runFullQuizAutomation } from './modules/quiz/quizAutomation';
+import { createAssignmentRunner } from './modules/assignments/assignmentRunner';
+import { detectAssignment } from './modules/assignments/assignmentDetector';
+import { codeAdapter } from './modules/assignments/codeAdapter';
+import { notebookAdapter } from './modules/assignments/notebookAdapter';
+import { assignmentApi } from './modules/assignments/assignmentApi';
+import { portalSubmission } from './modules/assignments/portalSubmission';
+import { createBatchAssignmentRunner } from './modules/assignments/batchAssignmentRunner';
 
 console.log('DOM Fetcher Service Worker loaded and active.');
 
@@ -26,6 +33,75 @@ let singleProgress = {
 let batchCompletedQuizzes = [];
 let autoSolvedList = [];
 let lastStatusMessage = null;
+let popupQuizLease = null;
+
+function popupQuizBusy() {
+  if (popupQuizLease && popupQuizLease.expiresAt <= Date.now()) popupQuizLease = null;
+  return Boolean(popupQuizLease);
+}
+
+let assignmentState = { job: null, busy: false };
+let assignmentBatchState = { batch: null, busy: false };
+const activeAssignmentOperations = new Set();
+const ASSIGNMENT_PROTOCOL_VERSION = 2;
+const assignmentActions = ['inspect', 'generate', 'apply', 'run', 'save', 'submit', 'restore', 'recover', 'automate', 'solve', 'stop'];
+const assignmentBatchActions = ['start', 'stop', 'recover'];
+const assignmentCapabilities = { assignmentActions, assignmentBatchActions };
+function emitAssignmentState() {
+  const state = { ...assignmentState, batch: assignmentBatchState.batch,
+    busy: assignmentBusy() };
+  broadcast({ type: 'ASSIGNMENT_STATE', protocolVersion: ASSIGNMENT_PROTOCOL_VERSION, ...state });
+  return state;
+}
+const assignments = createAssignmentRunner({
+  storage: chrome.storage?.local,
+  detect: detectAssignment,
+  adapters: { code: codeAdapter, notebook: notebookAdapter },
+  api: assignmentApi,
+  submission: portalSubmission,
+  isOtherBusy: () => isBatchRunning || isSingleRunning || popupQuizBusy(),
+  notify: (state) => { assignmentState = state; emitAssignmentState(); },
+});
+const assignmentBatches = createBatchAssignmentRunner({
+  storage: chrome.storage?.local, singleRunner: assignments,
+  isOtherBusy: () => isBatchRunning || isSingleRunning || popupQuizBusy(),
+  notify: (state) => { assignmentBatchState = state; emitAssignmentState(); },
+});
+const assignmentBusy = () => assignments.busy || assignmentBatches.busy || activeAssignmentOperations.size > 0;
+async function readAssignmentState() {
+  [assignmentState, assignmentBatchState] = await Promise.all([assignments.getState(), assignmentBatches.getState()]);
+  return { ...assignmentState, batch: assignmentBatchState.batch, busy: assignmentBusy(),
+    protocolVersion: ASSIGNMENT_PROTOCOL_VERSION, capabilities: assignmentCapabilities };
+}
+
+// A runtime request acknowledges dispatch immediately. Progress and the terminal
+// result use broadcasts, so a long solve does not depend on one popup response port.
+function dispatchAssignmentOperation(scope, action, payload, invoke, sendResponse) {
+  const operationId = crypto.randomUUID();
+  activeAssignmentOperations.add(operationId);
+  startKeepAlive();
+  let operation;
+  try { operation = invoke(payload); }
+  catch (error) {
+    activeAssignmentOperations.delete(operationId);
+    sendResponse({ success: false, protocolVersion: ASSIGNMENT_PROTOCOL_VERSION, error: error.message });
+    if (!assignmentBusy() && !isSingleRunning && !isBatchRunning) stopKeepAlive();
+    return;
+  }
+  sendResponse({ success: true, accepted: true, operationId, protocolVersion: ASSIGNMENT_PROTOCOL_VERSION });
+  const finish = async (success, error) => {
+    activeAssignmentOperations.delete(operationId);
+    let state;
+    try { state = await readAssignmentState(); }
+    catch (stateError) {
+      state = { ...assignmentState, batch: assignmentBatchState.batch, busy: assignmentBusy(), stateError: stateError.message };
+    }
+    broadcast({ type: 'ASSIGNMENT_ACTION_RESULT', ...state, protocolVersion: ASSIGNMENT_PROTOCOL_VERSION,
+      operationId, scope, action, success, ...(error ? { error: error.message || String(error) } : {}) });
+  };
+  Promise.resolve(operation).then(() => finish(true), (error) => finish(false, error))
+    .finally(() => { if (!assignmentBusy() && !isSingleRunning && !isBatchRunning) stopKeepAlive(); });
+}
 
 // Keep-alive timer to prevent Service Worker termination during automation
 let keepAliveTimer = null;
@@ -70,6 +146,55 @@ function clearBadge() {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const { type } = message || {};
 
+  if (type === 'GET_ASSIGNMENT_STATE') {
+    readAssignmentState().then(sendResponse).catch((error) => sendResponse({ success: false,
+      protocolVersion: ASSIGNMENT_PROTOCOL_VERSION, capabilities: assignmentCapabilities, error: error.message }));
+    return true;
+  }
+
+  if (type === 'ASSIGNMENT_ACTION') {
+    if (!assignmentActions.includes(message.action)) {
+      sendResponse({ success: false, protocolVersion: ASSIGNMENT_PROTOCOL_VERSION, error: 'Unknown assignment action.' });
+      return true;
+    }
+    if (message.action !== 'stop' && (assignmentBusy() || isBatchRunning || isSingleRunning || popupQuizBusy())) {
+      sendResponse({ success: false, protocolVersion: ASSIGNMENT_PROTOCOL_VERSION, error: 'Another quiz or assignment action is still active.' });
+      return true;
+    }
+    dispatchAssignmentOperation('action', message.action, message.payload,
+      (payload) => assignmentBatches.busy && message.action === 'stop' ? assignmentBatches.stop() : assignments.action(message.action, payload), sendResponse);
+    return true;
+  }
+
+  if (type === 'ASSIGNMENT_BATCH_ACTION') {
+    const method = message.action;
+    if (!assignmentBatchActions.includes(method)) { sendResponse({ success: false, protocolVersion: ASSIGNMENT_PROTOCOL_VERSION, error: 'Unknown assignment batch action.' }); return true; }
+    if (method !== 'stop' && (assignmentBusy() || isBatchRunning || isSingleRunning || popupQuizBusy())) {
+      sendResponse({ success: false, protocolVersion: ASSIGNMENT_PROTOCOL_VERSION, error: 'Another quiz or assignment action is still active.' });
+      return true;
+    }
+    dispatchAssignmentOperation('batch', message.action, message.payload, (payload) => assignmentBatches[method](payload), sendResponse);
+    return true;
+  }
+
+  if (type === 'ACQUIRE_POPUP_QUIZ_ACTION') {
+    if (assignmentBusy() || isSingleRunning || isBatchRunning || popupQuizBusy()) {
+      sendResponse({ success: false, error: 'Another quiz or assignment action is still active.' });
+    } else {
+      popupQuizLease = { token: crypto.randomUUID(), expiresAt: Date.now() + 180000 };
+      sendResponse({ success: true, token: popupQuizLease.token });
+    }
+    return true;
+  }
+
+  if (type === 'CHECK_POPUP_QUIZ_ACTION' || type === 'RELEASE_POPUP_QUIZ_ACTION') {
+    const valid = popupQuizBusy() && popupQuizLease.token === message.token;
+    if (valid && type === 'RELEASE_POPUP_QUIZ_ACTION') popupQuizLease = null;
+    else if (valid) popupQuizLease.expiresAt = Date.now() + 180000;
+    sendResponse({ success: Boolean(valid) });
+    return true;
+  }
+
   if (type === 'GET_AUTOMATION_STATE') {
     sendResponse({
       isBatchRunning,
@@ -79,13 +204,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       batchCompletedQuizzes,
       autoSolvedList,
       lastStatusMessage,
+      isAssignmentRunning: assignmentBusy(),
     });
     return true;
   }
 
   if (type === 'START_BATCH_AUTO_SOLVE') {
-    if (isBatchRunning) {
-      sendResponse({ started: false, reason: 'Batch is already running' });
+    if (isBatchRunning || isSingleRunning || assignmentBusy() || popupQuizBusy()) {
+      sendResponse({ started: false, reason: 'A quiz or assignment action is still active or stopping. Wait for it to finish.' });
       return true;
     }
 
@@ -143,12 +269,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         autoSolvedList.unshift(rec);
         broadcast({ type: 'QUESTION_SOLVED', record: rec });
       },
-      onComplete: () => {
+      onComplete: (result) => {
         isBatchRunning = false;
         activeBatchRef.current = false;
         stopKeepAlive();
-        updateBadge('✓', '#10b981');
-        broadcast({ type: 'BATCH_COMPLETE', completedQuizzes: batchCompletedQuizzes });
+        if (result?.success) updateBadge('✓', '#10b981');
+        else clearBadge();
+        broadcast({ type: 'BATCH_COMPLETE', completedQuizzes: batchCompletedQuizzes, result });
       },
     }).catch((err) => {
       console.error('Background batch error:', err);
@@ -165,18 +292,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (type === 'STOP_BATCH_AUTO_SOLVE') {
     activeBatchRef.current = false;
-    isBatchRunning = false;
-    stopKeepAlive();
+    // Keep the run locked until its pending request settles and onComplete runs.
     clearBadge();
-    lastStatusMessage = { type: 'info', text: '⏹️ Batch Auto-Solve paused.' };
+    lastStatusMessage = { type: 'info', text: 'Stopping batch; waiting for any pending request to finish.' };
     broadcast({ type: 'STATUS_UPDATE', status: lastStatusMessage });
     sendResponse({ stopped: true });
     return true;
   }
 
   if (type === 'START_SINGLE_AUTO_SOLVE') {
-    if (isSingleRunning) {
-      sendResponse({ started: false, reason: 'Single quiz solver is already running' });
+    if (isSingleRunning || isBatchRunning || assignmentBusy() || popupQuizBusy()) {
+      sendResponse({ started: false, reason: 'A quiz or assignment action is still active or stopping. Wait for it to finish.' });
       return true;
     }
 
@@ -228,7 +354,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         isSingleRunning = false;
         activeSingleRef.current = false;
         stopKeepAlive();
-        updateBadge('✓', '#10b981');
+        if (res?.success) updateBadge('✓', '#10b981');
+        else clearBadge();
         broadcast({ type: 'SINGLE_COMPLETE', result: res });
       },
     }).catch((err) => {
@@ -246,10 +373,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (type === 'STOP_SINGLE_AUTO_SOLVE') {
     activeSingleRef.current = false;
-    isSingleRunning = false;
-    stopKeepAlive();
+    // Do not allow a new run to reactivate the same ref while this one is stopping.
     clearBadge();
-    lastStatusMessage = { type: 'info', text: '⏹️ Quiz Auto-Solve paused.' };
+    lastStatusMessage = { type: 'info', text: 'Stopping quiz; waiting for any pending request to finish.' };
     broadcast({ type: 'STATUS_UPDATE', status: lastStatusMessage });
     sendResponse({ stopped: true });
     return true;

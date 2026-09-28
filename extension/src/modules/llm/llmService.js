@@ -1,16 +1,35 @@
 const API_BASE_URL = 'http://localhost:5001/api';
 
+/** Validate a numeric answer without dropping zero or changing its precision text. */
+export function normalizeNumericAnswer(value) {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    throw new Error('The solver must return a single numeric answer.');
+  }
+  const answer = String(value).trim();
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(answer) || !Number.isFinite(Number(answer))) {
+    throw new Error('The solver must return a finite decimal or scientific number without units or explanation.');
+  }
+  return answer;
+}
+
 /**
- * Formats a question object into the standard LLM solver payload: { q, o }
+ * Formats an MCQ or numerical question into a compact solver payload.
  * @param {Object} question - The question object with questionText and options array
- * @returns {{ q: string, o: Object.<string, string> }}
+ * @returns {{ q: string, o?: Object.<string, string>, answerType?: string }}
  */
 export function formatLlmPayload(question) {
   if (!question) return { q: '', o: {} };
 
+  if ((question.answerType || question.llmPayload?.answerType) === 'numeric') {
+    return {
+      q: (question.llmPayload?.q || question.questionText || question.question || '').trim(),
+      answerType: 'numeric',
+    };
+  }
+
   // Use pre-computed llmPayload if available
   if (question.llmPayload && question.llmPayload.q && question.llmPayload.o) {
-    return question.llmPayload;
+    return { q: question.llmPayload.q, o: question.llmPayload.o };
   }
 
   const optionsMap = {};
@@ -43,8 +62,8 @@ export async function fetchLlmConfig() {
 }
 
 /**
- * Executes the LLM MCQ solver endpoint and returns the solution with latency metrics.
- * @param {Object} payload - { q: string, o: Object }
+ * Executes the solver endpoint and returns an MCQ key or numeric string with metadata.
+ * @param {Object} payload - { q: string, o?: Object, answerType?: 'mcq' | 'numeric' }
  * @param {Object} [config]
  * @param {string} [config.apiKey]
  * @param {string} [config.model]
@@ -54,8 +73,10 @@ export async function fetchLlmConfig() {
  */
 export async function solveMcq(payload, config = {}) {
   const { apiKey, model, turbo = true, maxTokens } = config;
+  const answerType = payload?.answerType || 'mcq';
 
-  if (!payload || !payload.q || !payload.o || Object.keys(payload.o).length === 0) {
+  if (!payload?.q || !['mcq', 'numeric'].includes(answerType) ||
+      (answerType === 'mcq' && (!payload.o || Object.keys(payload.o).length === 0))) {
     throw new Error('Invalid question payload provided for LLM solving.');
   }
 
@@ -66,7 +87,8 @@ export async function solveMcq(payload, config = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       q: payload.q,
-      o: payload.o,
+      o: answerType === 'mcq' ? payload.o : undefined,
+      answerType,
       apiKey: apiKey ? apiKey.trim() : undefined,
       model: model ? model.trim() : undefined,
       turbo: Boolean(turbo),
@@ -77,29 +99,54 @@ export async function solveMcq(payload, config = {}) {
   const tEnd = performance.now();
   const roundtripMs = Math.round(tEnd - tStart);
 
-  const data = await res.json();
-  if (!res.ok || !data.success) {
-    throw new Error(data.error || 'LLM pipeline returned an error.');
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    const error = new Error(`The solver returned an invalid response (HTTP ${res.status}).`);
+    error.status = res.status;
+    throw error;
+  }
+  if (!res.ok || !data?.success) {
+    const error = new Error(data?.error || 'LLM pipeline returned an error.');
+    error.status = res.status;
+    throw error;
   }
 
-  // Deconstruct timings (T3: Backend -> LLM, T4: Inference, T2/T5: Network)
+  if (data.answerType && data.answerType !== answerType) {
+    throw new Error('The solver returned an answer for a different question type.');
+  }
+  const answer = answerType === 'numeric'
+    ? normalizeNumericAnswer(data.answer)
+    : String(data.answer ?? '').toUpperCase().trim();
+  if (answerType === 'mcq' && !Object.hasOwn(payload.o, answer)) {
+    throw new Error('The solver returned an answer that does not match the available option keys.');
+  }
+
+  // The round trip includes backend pacing and retries. Do not invent an
+  // inference/network split when the provider did not report one.
   const serverTimings = data.timings || {};
-  const t3_t4_total = serverTimings.t3_t4_total_ms || Math.round(roundtripMs * 0.85);
-  const t3 = serverTimings.t3_backend_to_llm_ms || 25;
-  const t4 = serverTimings.t4_llm_inference_ms || (t3_t4_total - t3);
-  const t2_t5 = Math.max(1, roundtripMs - t3_t4_total);
+  const backendMs = serverTimings.t3_t4_total_ms;
+  const networkMs = Number.isFinite(backendMs)
+    ? Math.max(0, roundtripMs - backendMs)
+    : null;
 
   return {
-    answer: (data.answer || '').toUpperCase().trim(),
-    confidence: data.confidence || (turbo ? 99 : 95),
+    answer,
+    answerType,
+    confidence: data.confidence ?? null,
     reason: data.reason || '',
     modelUsed: data.modelUsed,
     turbo: data.turbo,
+    cacheHit: Boolean(data.cacheHit),
+    deduplicated: Boolean(data.deduplicated),
+    usage: data.usage ?? null,
     timings: {
+      ...serverTimings,
       roundtripMs,
-      t3_backend_to_llm_ms: t3,
-      t4_llm_inference_ms: t4,
-      t2_t5_network_ms: t2_t5,
+      t3_backend_to_llm_ms: serverTimings.t3_backend_to_llm_ms ?? null,
+      t4_llm_inference_ms: serverTimings.t4_llm_inference_ms ?? null,
+      t2_t5_network_ms: networkMs,
     },
   };
 }

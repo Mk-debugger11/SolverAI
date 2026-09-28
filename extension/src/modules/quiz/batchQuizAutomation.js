@@ -53,6 +53,7 @@ export async function runBatchQuizAutomation({
   const attemptedQuizKeys = new Set();
   const successfulQuizzes = [];
   const failedQuizzes = [];
+  let batchError = null;
 
   const makeQuizKey = (q) => `${q.subject || ''}:::${q.title || ''}:::${q.date || ''}`;
 
@@ -237,12 +238,11 @@ export async function runBatchQuizAutomation({
       if (!isBatchRunningRef.current) break;
 
       // 5. Solve the full quiz via runFullQuizAutomation using isolated singleQuizRunningRef on quizTabId
-      const singleQuizRunningRef = { current: true };
-      const cancelSyncTimer = setInterval(() => {
-        if (!isBatchRunningRef.current) {
-          singleQuizRunningRef.current = false;
-        }
-      }, 150);
+      let childRunning = true;
+      const singleQuizRunningRef = {
+        get current() { return childRunning && isBatchRunningRef.current; },
+        set current(value) { childRunning = value; },
+      };
 
       let singleQuizResult = { success: false, error: null };
 
@@ -285,6 +285,7 @@ export async function runBatchQuizAutomation({
               if (res && typeof res.success === 'boolean') {
                 singleQuizResult.success = res.success;
                 singleQuizResult.error = res.error;
+                singleQuizResult.errorStatus = res.errorStatus;
               } else {
                 singleQuizResult.success = true;
               }
@@ -296,7 +297,7 @@ export async function runBatchQuizAutomation({
           });
         });
       } finally {
-        clearInterval(cancelSyncTimer);
+        childRunning = false;
       }
 
       if (!isBatchRunningRef.current) {
@@ -308,6 +309,16 @@ export async function runBatchQuizAutomation({
           type: 'info',
           text: '⏹️ Batch Auto-Solve paused by user.',
         });
+        break;
+      }
+
+      // Further quizzes cannot succeed while the provider rejects this account.
+      // Leave the current quiz open so the user can resume after resolving it.
+      if ([429, 401, 403].includes(singleQuizResult.errorStatus)) {
+        batchError = singleQuizResult.error || 'The AI provider is temporarily unavailable.';
+        failedQuizzes.push({ quiz: currentQuiz, error: batchError });
+        isBatchRunningRef.current = false;
+        onBatchStatus?.({ type: 'error', text: `Batch stopped: ${batchError}` });
         break;
       }
 
@@ -378,21 +389,26 @@ export async function runBatchQuizAutomation({
       });
 
       onBatchStatus?.({
-        type: 'success',
+        type: failedQuizzes.length ? 'error' : 'success',
         text: `🏁 Batch Auto-Solve Complete! Successfully solved ${successfulQuizzes.length} of ${totalToSolve} quizzes.${
           failedQuizzes.length > 0 ? ` (${failedQuizzes.length} skipped or failed)` : ''
         }`,
       });
     }
   } catch (err) {
+    batchError = err.message;
     console.error('Batch Quiz Automation Error:', err);
     onBatchStatus?.({
       type: 'error',
       text: `Batch Auto-Solve interrupted: ${err.message}`,
     });
   } finally {
+    const cancelled = !isBatchRunningRef.current && !batchError;
     isBatchRunningRef.current = false;
     onComplete?.({
+      success: !cancelled && !batchError && failedQuizzes.length === 0,
+      cancelled,
+      error: batchError,
       totalAttempted: attemptedQuizKeys.size,
       totalSuccessful: successfulQuizzes.length,
       failedQuizzes,

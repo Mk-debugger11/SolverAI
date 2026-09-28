@@ -1,5 +1,9 @@
 # DOM Fetcher — Chrome Extension (MERN Stack)
 
+See [quiz solver features and testing](docs/MCQ_EFFICIENCY.md) for numerical answers, request pacing, answer caching, token budgets and the current test/reload workflow.
+
+See [assignment setup and supported actions](docs/ASSIGNMENTS.md) for automatic coding and Jupyter solving, unfinished-assignment batches, request limits and recovery.
+
 A lightweight, clean Chrome Extension (Manifest V3) built with the **MERN** stack (**M**ongoDB, **E**xpress, **R**eact, **N**ode.js). It fetches the live DOM of any webpage you are viewing in Chrome, provides instant metrics and preview, and saves it into your MongoDB database.
 
 ---
@@ -43,7 +47,7 @@ chrome extension/
 
 ### Step 1: Start the Backend Server
 
-Make sure MongoDB is running on your machine:
+MongoDB is optional for quiz and assignment generation. Start it if you want to save DOM captures and use their history:
 ```bash
 # Check if MongoDB is running (already running if on default 27017)
 brew services start mongodb-community
@@ -55,7 +59,7 @@ npm run start:server
 # or for auto-reloading dev mode:
 npm run dev:server
 ```
-The server will start on **`http://localhost:5001`** and connect to MongoDB.
+The server starts on **`http://localhost:5001`**. If MongoDB is unavailable, solver routes remain usable and saved DOM history is unavailable.
 
 ---
 
@@ -68,7 +72,7 @@ The server will start on **`http://localhost:5001`** and connect to MongoDB.
 2. Enable **Developer mode** toggle in the top-right corner.
 3. Click the **Load unpacked** button in the top-left.
 4. Select the **`extension/dist`** folder inside this project directory:
-   `/Users/mukul/Documents/Web Dev Projects/chrome extension/extension/dist`
+   `/Users/kartikmadaan/Desktop/SolverAI/extension/dist`
 5. The **DOM Fetcher (MERN)** extension icon will appear in your extensions bar! Pin it for quick access.
 
 ---

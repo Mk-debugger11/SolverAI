@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DOM Fetcher (MERN)",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Captures the DOM of the active webpage and connects with your MERN stack.",
   "permissions": [
     "activeTab",

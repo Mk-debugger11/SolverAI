@@ -1,0 +1,172 @@
+.assignment-workbench {
+  --assignment-bg: #101b22;
+  --assignment-panel: #14232c;
+  --assignment-line: #2a3c46;
+  --assignment-muted: #a2b5c0;
+  --assignment-text: #ecf3f5;
+  --assignment-accent: #88e1c6;
+  color: var(--assignment-text);
+  background: var(--assignment-bg);
+  border: 1px solid var(--assignment-line);
+  border-radius: 12px;
+  font-family: 'Avenir Next', 'Trebuchet MS', sans-serif;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.assignment-workbench button, .assignment-workbench input, .assignment-workbench select { font: inherit; }
+.assignment-workbench button { cursor: pointer; }
+.assignment-workbench button:disabled { cursor: not-allowed; opacity: .45; }
+.assignment-workbench :is(button, input, select, summary, pre):focus-visible { outline: 2px solid var(--assignment-accent); outline-offset: 3px; }
+.assignment-header { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 18px 16px; border-top: 3px solid var(--assignment-accent); border-bottom: 1px solid var(--assignment-line); }
+.assignment-eyebrow { font: 9px 'Menlo', monospace; letter-spacing: 1.1px; color: var(--assignment-accent); margin-bottom: 5px; }
+.assignment-header h2 { font-size: 23px; font-weight: 650; letter-spacing: -.7px; line-height: 1.2; }
+.assignment-header p { color: var(--assignment-muted); font-size: 10px; margin-top: 5px; }
+.assignment-icon { width: 17px; height: 17px; flex-shrink: 0; }
+.assignment-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 8px 11px; border: 1px solid #45616d; border-radius: 6px; background: #1b303a; color: var(--assignment-text); font-weight: 600 !important; text-align: center; transition: background .15s, border-color .15s; }
+.assignment-button:hover:not(:disabled) { background: #29434e; border-color: #85afbd; }
+.assignment-button-primary { background: var(--assignment-accent); color: #102b24; border-color: var(--assignment-accent); }
+.assignment-button-primary:hover:not(:disabled) { background: #adf1db; border-color: #adf1db; }
+.assignment-wide { width: 100%; }
+.assignment-wide .assignment-icon { margin-left: auto; }
+.assignment-wide:has(.assignment-icon) { justify-content: space-between; }
+.assignment-inspect { font-size: 10px !important; min-width: 93px; padding-inline: 8px; }
+.assignment-launch { padding: 16px 14px 4px; border-bottom: 1px solid var(--assignment-line); background: #122129; }
+.assignment-launch-heading { display: flex; gap: 9px; align-items: center; margin-bottom: 10px; }
+.assignment-launch-heading h3 { font-size: 13px; font-weight: 600; }
+.assignment-launch-heading .assignment-step { font-size: 8px; letter-spacing: .6px; }
+.assignment-scope-message { margin: 0 0 12px; color: #b2c7d2; font-size: 11px; line-height: 1.6; }
+.assignment-solve { min-height: 43px; font-size: 13px !important; }
+.assignment-solve-batch { margin-top: 15px; min-height: 40px; }
+.assignment-solve-batch.is-catalog-primary { margin-top: 0; min-height: 43px; font-size: 13px !important; }
+.assignment-launch > .assignment-note { padding-inline: 1px; font-size: 10px; }
+.assignment-launch .assignment-settings { margin-top: 14px; }
+.assignment-settings > .assignment-note { padding: 0 10px 10px; font-size: 10px; }
+.assignment-manual { border-bottom: 1px solid var(--assignment-line); }
+.assignment-manual > summary { padding: 15px 14px; font-size: 12px; font-weight: 600; }
+.assignment-manual > summary > span { display: block; margin: 4px 0 0 14px; color: #819caa; font-weight: 400; font-size: 10px; }
+.assignment-manual[open] > summary { border-bottom: 1px solid var(--assignment-line); background: #172730; }
+.assignment-batch { padding: 15px 14px; border-bottom: 1px solid var(--assignment-line); background: #0e1b22; }
+.assignment-batch-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 9px; }
+.assignment-batch-heading h3 { font-size: 13px; font-weight: 600; }
+.assignment-batch-heading .assignment-eyebrow { display: block; font-size: 8px; }
+.assignment-batch-heading .assignment-stop { flex-shrink: 0; }
+.assignment-batch-count { margin-top: 11px; font-size: 10px; color: var(--assignment-muted); }
+.assignment-batch-count > strong { display: block; font-weight: 500; color: #d1e3eb; margin-top: 4px; overflow-wrap: anywhere; }
+.assignment-batch progress { display: block; width: 100%; height: 5px; border: 0; border-radius: 4px; margin-top: 9px; overflow: hidden; accent-color: var(--assignment-accent); background: #253b45; }
+.assignment-batch progress::-webkit-progress-bar { background: #253b45; }
+.assignment-batch progress::-webkit-progress-value { background: var(--assignment-accent); }
+.assignment-batch progress::-moz-progress-bar { background: var(--assignment-accent); }
+.assignment-batch .assignment-notice { margin: 10px 0; }
+.assignment-result-counts { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 13px; }
+.assignment-outcome { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; font-weight: 500; white-space: nowrap; padding: 2px 6px; border: 1px solid #3c525d; border-radius: 3px; background: #1c2f38; color: #b9d1dc; }
+.assignment-outcome.is-accepted { color: #a0e6c4; border-color: #376452; background: #163228; }
+.assignment-outcome.is-submitted { color: #b4d4f3; border-color: #3c5d7c; background: #182e43; }
+.assignment-outcome.is-failed, .assignment-outcome.is-rejected { color: #f3b7ab; border-color: #735147; background: #362823; }
+.assignment-outcome.is-unknown { color: #e7cb97; border-color: #6b5b39; background: #312c1e; }
+.assignment-outcome.is-skipped { color: #b4bfc6; border-color: #48525a; background: #242c31; }
+.assignment-batch-results { list-style: none; padding: 0; margin: 10px 0 0; border: 1px solid var(--assignment-line); border-radius: 5px; overflow: hidden; max-height: 260px; overflow-y: auto; }
+.assignment-batch-results li { padding: 9px; }
+.assignment-batch-results li + li { border-top: 1px solid var(--assignment-line); }
+.assignment-batch-results li > div { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
+.assignment-batch-results strong { font-size: 10px; font-weight: 500; overflow-wrap: anywhere; }
+.assignment-batch-results p { margin-top: 4px; color: #94aebc; font-size: 10px; overflow-wrap: anywhere; }
+.assignment-submission { padding: 12px 14px; border-bottom: 1px solid var(--assignment-line); }
+.assignment-submission .assignment-outcome { margin-left: auto; }
+.assignment-submission details { margin-top: 9px; font-size: 10px; }
+.assignment-submission pre { margin-top: 8px; padding: 10px; background: #0a141a; font: 10px/1.6 'Menlo', monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow-y: auto; }
+.assignment-status { display: flex; align-items: flex-start; gap: 9px; padding: 12px 16px; border-bottom: 1px solid var(--assignment-line); background: #14272b; }
+.assignment-status strong { font-size: 12px; font-weight: 650; }
+.assignment-status p { color: #c5d5dc; font-size: 11px; margin-top: 3px; overflow-wrap: anywhere; }
+.assignment-status > div { min-width: 0; flex: 1; }
+.assignment-status-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 6px; background: #809caa; flex-shrink: 0; }
+.assignment-status-dot.is-active { background: var(--assignment-accent); box-shadow: 0 0 0 4px #88e1c61a; animation: assignment-pulse 1.8s ease-in-out infinite; }
+.assignment-status.has-attention { background: #2b241b; }
+.assignment-status.has-attention .assignment-status-dot { background: #f1c584; }
+.assignment-stop { display: inline-flex; gap: 5px; align-items: center; padding: 4px 7px; color: #f3c0b4; background: #382724; border: 1px solid #775247; border-radius: 5px; font-size: 10px !important; }
+.assignment-stop .assignment-icon { width: 12px; height: 12px; }
+.assignment-workbench > .assignment-note { padding: 12px 16px; }
+.assignment-note { font-size: 11px; line-height: 1.5; color: var(--assignment-muted); margin-top: 7px; }
+.assignment-empty { text-align: center; padding: 32px 22px 24px; }
+.assignment-empty-mark { display: flex; align-items: center; justify-content: center; margin: 0 auto 15px; width: 64px; height: 52px; border: 1px solid #37515d; border-radius: 8px; background: repeating-linear-gradient(0deg, transparent 0 11px, #29404b33 11px 12px); color: var(--assignment-accent); box-shadow: 5px 5px 0 #1b2c35; }
+.assignment-empty-mark .assignment-icon { width: 29px; height: 29px; }
+.assignment-empty h3 { font-size: 15px; margin-bottom: 8px; font-weight: 600; }
+.assignment-empty p { color: var(--assignment-muted); font-size: 12px; line-height: 1.65; }
+.assignment-empty-types { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 21px; }
+.assignment-empty-types span { font: 8px 'Menlo', monospace; letter-spacing: .7px; color: #93afbd; }
+.assignment-empty-types span + span::before { content: '·'; margin-right: 8px; }
+.assignment-context { padding: 15px 16px; border-bottom: 1px solid var(--assignment-line); }
+.assignment-workspace-label { display: flex; align-items: center; gap: 7px; color: var(--assignment-accent); font-size: 10px; }
+.assignment-runtime { margin-left: auto; color: #d6e4ea; font: 9px 'Menlo', monospace; max-width: 130px; overflow-wrap: anywhere; text-align: right; }
+.assignment-context h3 { font-size: 15px; font-weight: 600; margin: 8px 0 3px; line-height: 1.4; overflow-wrap: anywhere; }
+.assignment-context-id { font: 9px 'Menlo', monospace; color: #7895a4; overflow-wrap: anywhere; }
+.assignment-workbench summary { cursor: pointer; color: #b8cbd5; }
+.assignment-statement { margin-top: 12px; font-size: 11px; }
+.assignment-statement pre { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 210px; overflow: auto; margin-top: 8px; color: #d5e2e8; padding: 10px; border-left: 2px solid #3f6774; background: #0d171d; }
+.assignment-notice { margin: 12px 14px; padding: 11px 12px; border-left: 3px solid #6296aa; background: #192c36; font-size: 11px; color: #c2d5df; }
+.assignment-notice strong { color: #e8f2f6; font-weight: 600; }
+.assignment-notice p { margin-top: 4px; overflow-wrap: anywhere; }
+.assignment-notice.is-warning { border-color: #e4b578; background: #30271d; color: #ead2b1; }
+.assignment-notice .assignment-button { margin-top: 9px; }
+.assignment-section { padding: 15px 14px; border-bottom: 1px solid var(--assignment-line); }
+.assignment-section-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.assignment-section-heading h3 { font-size: 13px; font-weight: 650; }
+.assignment-source-picker h3 { font-size: 13px; font-weight: 650; }
+.assignment-source-picker .assignment-select-label { margin-top: 10px; }
+.assignment-step { font: 10px 'Menlo', monospace; color: #77c4b5; min-width: 18px; }
+.assignment-section-count { margin-left: auto; color: #93aab8; font-size: 10px; text-align: right; }
+.assignment-targets { margin-top: 11px; border: 1px solid var(--assignment-line); border-radius: 6px; overflow: hidden; }
+.assignment-target-columns, .assignment-target-row { display: grid; grid-template-columns: minmax(0, 1fr) 32px; gap: 5px; align-items: center; padding: 8px 10px; }
+.assignment-target-columns.is-notebook, .assignment-target-row.is-notebook { grid-template-columns: minmax(0, 1fr) 30px 30px; }
+.assignment-target-columns { font-size: 9px; text-transform: uppercase; letter-spacing: .6px; color: #8ca9b7; background: #0c171d; }
+.assignment-target-columns span:not(:first-child) { text-align: center; }
+.assignment-target + .assignment-target { border-top: 1px solid var(--assignment-line); }
+.assignment-target { background: var(--assignment-panel); }
+.assignment-target-row input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--assignment-accent); justify-self: center; cursor: pointer; }
+.assignment-target-row input:disabled { cursor: not-allowed; opacity: .5; }
+.assignment-target-name { min-width: 0; }
+.assignment-target-name strong { display: block; font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
+.assignment-target-name > span { display: block; color: #8ca7b6; font-size: 9px; }
+.assignment-target-source { padding: 0 10px 8px; font-size: 10px; }
+.assignment-target-source .assignment-source { margin-top: 7px; }
+.assignment-source { border: 1px solid #2b424d; border-radius: 5px; overflow: hidden; background: #0b141a; }
+.assignment-source-label { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 7px 9px; background: #182932; color: #afc6d2; font-size: 9px; }
+.assignment-source-label span:last-child { flex-shrink: 0; color: #7f9dab; }
+.assignment-source pre { font: 10px/1.7 'Menlo', 'Consolas', monospace; padding: 11px 10px; max-height: 260px; min-height: 53px; white-space: pre; overflow: auto; tab-size: 4; color: #d8e9ef; }
+.assignment-target-source .assignment-source pre { max-height: 170px; }
+.assignment-source code { font: inherit; white-space: pre; }
+.assignment-empty-source { color: #6f8b99; font-style: italic; }
+.assignment-settings { margin: 10px 0 12px; border: 1px solid var(--assignment-line); border-radius: 6px; }
+.assignment-settings summary { padding: 8px 10px; font-size: 10px; }
+.assignment-settings summary > span { display: block; color: #7996a6; font: 9px 'Menlo', monospace; margin: 3px 0 0 12px; overflow-wrap: anywhere; }
+.assignment-settings-fields { display: grid; grid-template-columns: minmax(0, 1fr) 106px; gap: 9px; padding: 0 10px 11px; }
+.assignment-settings-fields label, .assignment-select-label { font-size: 10px; color: #b5c9d3; }
+.assignment-workbench input[type=text], .assignment-workbench input[type=number], .assignment-workbench select { width: 100%; min-width: 0; margin-top: 4px; padding: 7px 8px; border: 1px solid #3b5562; border-radius: 4px; color: #e5f1f5; background: #0c171e; font-size: 10px; }
+.assignment-select-label { display: block; margin-bottom: 10px; }
+.assignment-preview-tabs { display: flex; gap: 4px; padding: 3px; border: 1px solid var(--assignment-line); border-radius: 6px; margin-bottom: 8px; }
+.assignment-preview-tabs button { flex: 1; border: 0; border-radius: 3px; padding: 6px 8px; background: transparent; color: #9ab3c1; font-size: 10px; }
+.assignment-preview-tabs button[aria-pressed=true] { background: #29434c; color: #c6f1e5; }
+.assignment-preview-empty { padding: 18px 15px; color: #879fac; text-align: center; border: 1px dashed #3a4d57; border-radius: 6px; font-size: 11px; }
+.assignment-section > .assignment-button:last-child { margin-top: 10px; }
+.assignment-button-row { display: flex; gap: 8px; }
+.assignment-button-row > button { flex: 1; font-size: 11px; }
+.assignment-automate { margin-top: 14px; padding-top: 14px; border-top: 1px dashed #38515b; }
+.assignment-automate p { color: #a7bdc8; font-size: 10px; margin-top: 7px; }
+.assignment-automate p + p { color: #829ead; }
+.assignment-results .assignment-section-heading { align-items: flex-start; justify-content: space-between; }
+.assignment-results .assignment-section-heading > span { font-size: 10px; color: #adc6d4; }
+.assignment-results details { border: 1px solid var(--assignment-line); margin-top: 8px; border-radius: 5px; }
+.assignment-results summary { padding: 8px 9px; font-size: 10px; overflow-wrap: anywhere; }
+.assignment-results summary span { float: right; color: #b0d1ca; margin-left: 6px; }
+.assignment-results pre { padding: 10px; font: 10px/1.5 'Menlo', monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; background: #0c151c; }
+.assignment-results .assignment-result-error { color: #f1b7a7; }
+.assignment-footer { padding: 13px 14px; background: #0c171e; }
+.assignment-usage { display: grid; grid-template-columns: 1fr 1fr 1.1fr; gap: 9px; }
+.assignment-usage dt { font-size: 9px; color: #819caa; }
+.assignment-usage dd { margin-top: 3px; font: 15px 'Menlo', monospace; color: #d5e7ee; }
+.assignment-usage small { font-size: 10px; color: #74909f; }
+.assignment-footer-actions { margin-top: 13px; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--assignment-line); padding-top: 9px; font-size: 9px; color: #7896a5; }
+.assignment-text-button { padding: 3px 0; border: 0; background: none; color: #b4cec9; font-size: 10px !important; text-decoration: underline; text-underline-offset: 3px; }
+@keyframes assignment-pulse { 50% { box-shadow: 0 0 0 4px #88e1c633; } }
+@media (prefers-reduced-motion: reduce) { .assignment-workbench * { animation: none !important; transition: none !important; } }
+@media (max-width: 370px) { .assignment-header { padding-inline: 12px; } .assignment-header h2 { font-size: 21px; } .assignment-header p { max-width: 140px; } .assignment-section { padding-inline: 10px; } .assignment-settings-fields { grid-template-columns: 1fr; } }

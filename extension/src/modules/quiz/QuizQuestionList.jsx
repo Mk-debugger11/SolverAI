@@ -1,8 +1,37 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+
+function NumericAnswerField({ question, disabled, onFill }) {
+  const [value, setValue] = useState(String(question.inputValue ?? ''));
+  useEffect(() => setValue(String(question.inputValue ?? '')), [question.inputValue]);
+
+  return (
+    <form className="settings-field" style={{ padding: '12px' }} onSubmit={(event) => {
+      event.preventDefault();
+      if (!disabled) onFill(value);
+    }}>
+      <label htmlFor={`numeric-${question.questionId}`}>Numerical answer</label>
+      <div className="action-row">
+        <input
+          id={`numeric-${question.questionId}`}
+          className="input-text"
+          type="text"
+          inputMode="decimal"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          placeholder="e.g. 6, -0.25 or 1e-3"
+          disabled={disabled}
+          autoComplete="off"
+          aria-label="Numerical answer"
+        />
+        <button className="btn btn-secondary" type="submit" disabled={disabled || !value.trim()}>Fill answer</button>
+      </div>
+      <span className="settings-hint">Fill writes your number to the quiz. Solve generates an answer using AI.</span>
+    </form>
+  );
+}
 
 /**
- * QuizQuestionList displays extracted radio questions, option lists,
- * manual option selection buttons, and raw HTML/JSON viewers.
+ * Displays MCQ and numerical questions with answer controls and DOM viewers.
  */
 export default function QuizQuestionList({
   capturedDom,
@@ -17,6 +46,7 @@ export default function QuizQuestionList({
   onSelectOptionB,
   onSelectOption,
   onSolveQuestion,
+  onFillNumericAnswer,
   getLlmPayload,
   getOptionB,
 }) {
@@ -27,13 +57,13 @@ export default function QuizQuestionList({
 
   return (
     <section className="card dom-card">
-      {/* Sub-view toggle: Radio Questions vs Full DOM */}
+      {/* Sub-view toggle: Quiz Questions vs Full DOM */}
       <div className="subview-toggle">
         <button
           className={`subview-btn ${domSubView === 'questions' ? 'active' : ''}`}
           onClick={() => setDomSubView('questions')}
         >
-          🎯 Radio Containers ({capturedDom.questions?.length || 0})
+          🎯 Quiz Questions ({capturedDom.questions?.length || 0})
         </button>
         <button
           className={`subview-btn ${domSubView === 'full_dom' ? 'active' : ''}`}
@@ -43,12 +73,12 @@ export default function QuizQuestionList({
         </button>
       </div>
 
-      {/* Sub-view: RADIO QUESTIONS ONLY */}
+      {/* Sub-view: Quiz questions */}
       {domSubView === 'questions' && (
         <div className="questions-container">
           {capturedDom.questions?.length === 0 ? (
             <div className="empty-state">
-              <p>No radio inputs (<code>&lt;input type="radio"&gt;</code>) detected on this webpage.</p>
+              <p>No editable MCQ or numerical answer fields were found. Open a question or enter revision mode first.</p>
               <button
                 className="btn btn-secondary"
                 style={{ marginTop: '8px' }}
@@ -59,7 +89,7 @@ export default function QuizQuestionList({
             </div>
           ) : (
             <>
-              {/* Global action buttons for Radio Questions */}
+              {/* Global question actions */}
               <div className="action-row">
                 <button
                   id="save-mongo-btn"
@@ -69,14 +99,15 @@ export default function QuizQuestionList({
                 >
                   {saving ? 'Saving...' : '💾 Save to DB'}
                 </button>
-                <button
+                {capturedDom.questions[0]?.answerType !== 'numeric' && <button
                   id="select-opt-b-global"
                   className="btn btn-warning"
                   onClick={() => onSelectOptionB(0)}
                   title="Select Option B on the live webpage"
+                  disabled={solving}
                 >
                   🎯 Select Option B
-                </button>
+                </button>}
                 <button
                   id="copy-llm-global-btn"
                   className="btn btn-llm"
@@ -85,7 +116,7 @@ export default function QuizQuestionList({
                     const toCopy = allPayloads.length === 1 ? allPayloads[0] : allPayloads;
                     copyToClipboard(JSON.stringify(toCopy, null, 2), 'global_llm_payload');
                   }}
-                  title="Copy LLM Payload JSON: { q: '...', o: { A: '...', B: '...' } }"
+                  title="Copy the question's solver payload"
                 >
                   {copiedType === 'global_llm_payload' ? '✓ Copied LLM!' : '🤖 LLM Payload'}
                 </button>
@@ -122,6 +153,7 @@ export default function QuizQuestionList({
                       <div className="question-card-header">
                         <div className="q-badge-row">
                           <span className="q-badge">Q{qIndex + 1}</span>
+                          {q.answerType === 'numeric' && <span className="q-id-badge">Numerical</span>}
                           {q.questionId && (
                             <span
                               className="q-id-badge"
@@ -133,9 +165,9 @@ export default function QuizQuestionList({
                           <div className="q-badge-actions">
                             <button
                               className={`btn-solve-card ${turboMode ? 'turbo' : ''}`}
-                              onClick={() => onSolveQuestion(qIndex)}
+                              onClick={() => onSolveQuestion(q)}
                               disabled={solving}
-                              title={turboMode ? "Solve with Turbo Mode (~15ms) and click on webpage" : "Solve with LLM and click on webpage"}
+                              title="Solve this question and fill or select its answer on the webpage"
                             >
                               {solving ? '⚡...' : (turboMode ? '⚡ Turbo' : '⚡ Solve')}
                             </button>
@@ -145,6 +177,7 @@ export default function QuizQuestionList({
                                   optionB.checked ? 'is-selected' : ''
                                 }`}
                                 onClick={() => onSelectOptionB(qIndex)}
+                                disabled={solving}
                                 title={`Select Option B (${optionB.text}) on live webpage`}
                               >
                                 {optionB.checked ? '✓ Option B' : '🎯 Select Option B'}
@@ -158,7 +191,7 @@ export default function QuizQuestionList({
                                   `llm_copy_${qIndex}`
                                 )
                               }
-                              title="Copy LLM Payload: { q: '...', o: { A: '...', B: '...' } }"
+                              title="Copy the question's solver payload"
                             >
                               {copiedType === `llm_copy_${qIndex}`
                                 ? '✓ Copied LLM!'
@@ -183,6 +216,13 @@ export default function QuizQuestionList({
                         <div className="q-title">{q.questionText || q.question}</div>
                       </div>
 
+                      {q.answerType === 'numeric' && <NumericAnswerField
+                        key={`${q.questionId}:${q.questionText}`}
+                        question={q}
+                        disabled={solving}
+                        onFill={(value) => onFillNumericAnswer(qIndex, value)}
+                      />}
+
                       {/* Options List */}
                       <div className="options-list">
                         {(q.options || []).map((opt, oIdx) => {
@@ -194,7 +234,8 @@ export default function QuizQuestionList({
                               className={`option-item ${opt.checked ? 'checked' : ''} ${
                                 isOptionB ? 'is-opt-b' : ''
                               }`}
-                              onClick={() => onSelectOption(qIndex, oIdx)}
+                              onClick={solving ? undefined : () => onSelectOption(qIndex, oIdx)}
+                              aria-disabled={solving}
                               title={`Click to select Option ${letter} on live webpage`}
                             >
                               <span className="radio-circle">
@@ -219,6 +260,7 @@ export default function QuizQuestionList({
                                   isOptionB ? 'btn-click-b' : ''
                                 }`}
                                 title={`Select Option ${letter} on live webpage`}
+                                disabled={solving}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   onSelectOption(qIndex, oIdx);

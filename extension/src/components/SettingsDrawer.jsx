@@ -63,7 +63,7 @@ export default function SettingsDrawer({
               localStorage.setItem('groq_model', e.target.value);
             }}
           >
-            <option value="qwen/qwen3.8-27b">qwen/qwen3.8-27b (Recommended, Ultra-Fast ~80ms)</option>
+            <option value="qwen/qwen3.8-27b">qwen/qwen3.8-27b</option>
             <option value="openai/gpt-oss-120b">openai/gpt-oss-120b (High Reasoning)</option>
             <option value="openai/gpt-oss-20b">openai/gpt-oss-20b</option>
             <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
@@ -77,7 +77,7 @@ export default function SettingsDrawer({
           <input
             type="number"
             min="64"
-            max="8192"
+            max="2048"
             step="64"
             className="input-text"
             placeholder="2048"
@@ -88,14 +88,14 @@ export default function SettingsDrawer({
             }}
           />
           <span className="settings-hint">
-            Higher token limits prevent JSON truncation errors (Default: 2048 for precision, 256 for turbo).
+            Turbo caps output at 512 tokens; detailed mode caps it at 2048. Requests are paced to respect API limits, and repeated answers are cached.
           </span>
         </div>
 
         {/* Turbo Mode Toggle */}
         <div className="settings-field">
           <label>
-            <span>⚡ Turbo Mode (1-token output)</span>
+            <span>⚡ Turbo Mode (compact answer)</span>
             <button
               type="button"
               className={`toggle-switch-btn ${turboMode ? 'active' : ''}`}
@@ -105,7 +105,7 @@ export default function SettingsDrawer({
             </button>
           </label>
           <span className="settings-hint">
-            Outputs strictly 1 token for the option key instead of verbose explanations. Drops LLM latency from ~120ms to ~15ms.
+            Returns compact JSON and disables Qwen thinking to save tokens. Turn off for harder questions and a brief explanation. API limits may require a wait.
           </span>
         </div>
       </div>
