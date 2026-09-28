@@ -1,4 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import {
+  IconCrosshair,
+  IconFileText,
+  IconDatabase,
+  IconCpu,
+  IconCode,
+  IconZap,
+  IconCheck,
+  IconCopy,
+} from '../../components/Icons';
 
 function NumericAnswerField({ question, disabled, onFill }) {
   const [value, setValue] = useState(String(question.inputValue ?? ''));
@@ -63,13 +73,15 @@ export default function QuizQuestionList({
           className={`subview-btn ${domSubView === 'questions' ? 'active' : ''}`}
           onClick={() => setDomSubView('questions')}
         >
-          🎯 Quiz Questions ({capturedDom.questions?.length || 0})
+          <IconCrosshair size={12} style={{ marginRight: '5px' }} />
+          Quiz Questions ({capturedDom.questions?.length || 0})
         </button>
         <button
           className={`subview-btn ${domSubView === 'full_dom' ? 'active' : ''}`}
           onClick={() => setDomSubView('full_dom')}
         >
-          📄 Full Page DOM
+          <IconFileText size={12} style={{ marginRight: '5px' }} />
+          Full Page DOM
         </button>
       </div>
 
@@ -96,8 +108,10 @@ export default function QuizQuestionList({
                   className="btn btn-success"
                   onClick={() => onSaveToMongo('radio_containers')}
                   disabled={saving}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                 >
-                  {saving ? 'Saving...' : '💾 Save to DB'}
+                  <IconDatabase size={12} style={{ marginRight: '4px' }} />
+                  {saving ? 'Saving...' : 'Save to DB'}
                 </button>
                 {capturedDom.questions[0]?.answerType !== 'numeric' && <button
                   id="select-opt-b-global"
@@ -105,8 +119,10 @@ export default function QuizQuestionList({
                   onClick={() => onSelectOptionB(0)}
                   title="Select Option B on the live webpage"
                   disabled={solving}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                 >
-                  🎯 Select Option B
+                  <IconCrosshair size={12} style={{ marginRight: '4px' }} />
+                  Select Option B
                 </button>}
                 <button
                   id="copy-llm-global-btn"
@@ -117,8 +133,17 @@ export default function QuizQuestionList({
                     copyToClipboard(JSON.stringify(toCopy, null, 2), 'global_llm_payload');
                   }}
                   title="Copy the question's solver payload"
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                 >
-                  {copiedType === 'global_llm_payload' ? '✓ Copied LLM!' : '🤖 LLM Payload'}
+                  {copiedType === 'global_llm_payload' ? (
+                    <>
+                      <IconCheck size={12} style={{ marginRight: '4px' }} /> Copied LLM!
+                    </>
+                  ) : (
+                    <>
+                      <IconCpu size={12} style={{ marginRight: '4px' }} /> LLM Payload
+                    </>
+                  )}
                 </button>
                 <button
                   className="btn btn-secondary"
@@ -128,8 +153,17 @@ export default function QuizQuestionList({
                       'all_containers_html'
                     )
                   }
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                 >
-                  {copiedType === 'all_containers_html' ? '✓ Copied!' : '📋 HTML'}
+                  {copiedType === 'all_containers_html' ? (
+                    <>
+                      <IconCheck size={12} style={{ marginRight: '4px' }} /> Copied!
+                    </>
+                  ) : (
+                    <>
+                      <IconFileText size={12} style={{ marginRight: '4px' }} /> HTML
+                    </>
+                  )}
                 </button>
                 <button
                   className="btn btn-secondary"
@@ -139,8 +173,17 @@ export default function QuizQuestionList({
                       'questions_json'
                     )
                   }
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                 >
-                  {copiedType === 'questions_json' ? '✓ Copied' : '{ } JSON'}
+                  {copiedType === 'questions_json' ? (
+                    <>
+                      <IconCheck size={12} style={{ marginRight: '4px' }} /> Copied
+                    </>
+                  ) : (
+                    <>
+                      <IconCode size={12} style={{ marginRight: '4px' }} /> JSON
+                    </>
+                  )}
                 </button>
               </div>
 
@@ -168,8 +211,10 @@ export default function QuizQuestionList({
                               onClick={() => onSolveQuestion(q)}
                               disabled={solving}
                               title="Solve this question and fill or select its answer on the webpage"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                             >
-                              {solving ? '⚡...' : (turboMode ? '⚡ Turbo' : '⚡ Solve')}
+                              <IconZap size={11} />
+                              {solving ? '...' : (turboMode ? 'Turbo' : 'Solve')}
                             </button>
                             {optionB && (
                               <button
@@ -179,8 +224,17 @@ export default function QuizQuestionList({
                                 onClick={() => onSelectOptionB(qIndex)}
                                 disabled={solving}
                                 title={`Select Option B (${optionB.text}) on live webpage`}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                               >
-                                {optionB.checked ? '✓ Option B' : '🎯 Select Option B'}
+                                {optionB.checked ? (
+                                  <>
+                                    <IconCheck size={11} /> Option B
+                                  </>
+                                ) : (
+                                  <>
+                                    <IconCrosshair size={11} /> Select Option B
+                                  </>
+                                )}
                               </button>
                             )}
                             <button
@@ -192,10 +246,17 @@ export default function QuizQuestionList({
                                 )
                               }
                               title="Copy the question's solver payload"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                             >
-                              {copiedType === `llm_copy_${qIndex}`
-                                ? '✓ Copied LLM!'
-                                : '🤖 LLM Payload'}
+                              {copiedType === `llm_copy_${qIndex}` ? (
+                                <>
+                                  <IconCheck size={11} /> Copied LLM!
+                                </>
+                              ) : (
+                                <>
+                                  <IconCpu size={11} /> LLM Payload
+                                </>
+                              )}
                             </button>
                             <button
                               className="btn-copy-question"
@@ -206,10 +267,17 @@ export default function QuizQuestionList({
                                 )
                               }
                               title="Copy complete JSON object of this question with all DOM attributes and options"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                             >
-                              {copiedType === `q_copy_${qIndex}`
-                                ? '✓ Copied Question!'
-                                : '📋 Copy Question'}
+                              {copiedType === `q_copy_${qIndex}` ? (
+                                <>
+                                  <IconCheck size={11} /> Copied Question!
+                                </>
+                              ) : (
+                                <>
+                                  <IconCopy size={11} /> Copy Question
+                                </>
+                              )}
                             </button>
                           </div>
                         </div>
@@ -265,8 +333,19 @@ export default function QuizQuestionList({
                                   e.stopPropagation();
                                   onSelectOption(qIndex, oIdx);
                                 }}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                               >
-                                {opt.checked ? '✓ Selected' : isOptionB ? '🎯 Select B' : 'Select'}
+                                {opt.checked ? (
+                                  <>
+                                    <IconCheck size={10} /> Selected
+                                  </>
+                                ) : isOptionB ? (
+                                  <>
+                                    <IconCrosshair size={10} /> Select B
+                                  </>
+                                ) : (
+                                  'Select'
+                                )}
                               </button>
                             </div>
                           );
@@ -286,7 +365,7 @@ export default function QuizQuestionList({
                           >
                             {expandedLlmIndex === qIndex
                               ? 'Hide LLM Payload ▲'
-                              : '🤖 View LLM Payload ▼'}
+                              : 'View LLM Payload ▼'}
                           </button>
                           <button
                             className="btn-link"
@@ -310,10 +389,15 @@ export default function QuizQuestionList({
                             )
                           }
                           title="Copy LLM Payload JSON"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                         >
-                          {copiedType === `div_llm_${qIndex}`
-                            ? '✓ Copied'
-                            : 'Copy LLM'}
+                          {copiedType === `div_llm_${qIndex}` ? (
+                            <>
+                              <IconCheck size={10} /> Copied
+                            </>
+                          ) : (
+                            'Copy LLM'
+                          )}
                         </button>
                       </div>
 
@@ -345,14 +429,25 @@ export default function QuizQuestionList({
               className="btn btn-success"
               onClick={() => onSaveToMongo('full_dom')}
               disabled={saving}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
             >
-              {saving ? 'Saving...' : '💾 Save Full Page to DB'}
+              <IconDatabase size={12} />
+              {saving ? 'Saving...' : 'Save Full Page to DB'}
             </button>
             <button
               className="btn btn-secondary"
               onClick={() => copyToClipboard(capturedDom.fullHtml, 'full_html')}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
             >
-              {copiedType === 'full_html' ? '✓ Copied!' : '📋 Copy Full HTML'}
+              {copiedType === 'full_html' ? (
+                <>
+                  <IconCheck size={12} /> Copied!
+                </>
+              ) : (
+                <>
+                  <IconFileText size={12} /> Copy Full HTML
+                </>
+              )}
             </button>
           </div>
           <pre className="code-preview full-dom-preview">

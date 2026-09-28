@@ -1,7 +1,7 @@
 {
-  "name": "dom-fetcher-mern-extension",
+  "name": "solver-ai",
   "version": "1.0.0",
-  "description": "Chrome extension to fetch webpage DOM and save to MERN stack",
+  "description": "Solver.Ai Chrome Extension with Express & MongoDB backend",
   "scripts": {
     "start:server": "cd backend && npm start",
     "dev:server": "cd backend && npm run dev",

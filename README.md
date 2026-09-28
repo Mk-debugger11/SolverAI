@@ -1,10 +1,10 @@
-# DOM Fetcher — Chrome Extension (MERN Stack)
+# Solver.Ai — Chrome Extension (MERN Stack)
 
 See [quiz solver features and testing](docs/MCQ_EFFICIENCY.md) for numerical answers, request pacing, answer caching, token budgets and the current test/reload workflow.
 
 See [assignment setup and supported actions](docs/ASSIGNMENTS.md) for automatic coding and Jupyter solving, unfinished-assignment batches, request limits and recovery.
 
-A lightweight, clean Chrome Extension (Manifest V3) built with the **MERN** stack (**M**ongoDB, **E**xpress, **R**eact, **N**ode.js). It fetches the live DOM of any webpage you are viewing in Chrome, provides instant metrics and preview, and saves it into your MongoDB database.
+An automated quiz and assignment solver and DOM extractor Chrome Extension (Manifest V3), built with React, Vite, Express, and Groq Cloud. MongoDB is optional for capture history.
 
 ---
 
@@ -71,16 +71,15 @@ The server starts on **`http://localhost:5001`**. If MongoDB is unavailable, sol
    ```
 2. Enable **Developer mode** toggle in the top-right corner.
 3. Click the **Load unpacked** button in the top-left.
-4. Select the **`extension/dist`** folder inside this project directory:
-   `/Users/kartikmadaan/Desktop/SolverAI/extension/dist`
-5. The **DOM Fetcher (MERN)** extension icon will appear in your extensions bar! Pin it for quick access.
+4. Select the **`extension/dist`** folder inside this project directory.
+5. The **Solver.Ai** extension icon will appear in your extensions bar! Pin it for quick access.
 
 ---
 
 ### Step 3: Use the Extension
 
 1. Navigate to any webpage with multiple-choice questions or radio forms (e.g. Google Forms, quizzes, surveys, exam portals).
-2. Click the **DOM Fetcher** extension icon in your Chrome toolbar.
+2. Click the **Solver.Ai** extension icon in your Chrome toolbar.
 3. Click **⚡ Fetch & Extract Radio Containers**:
    - Automatically finds all `<input type="radio">` elements on the page.
    - Selects the parent `<div>` container holding each question and all its options.

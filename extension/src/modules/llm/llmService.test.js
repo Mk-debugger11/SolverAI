@@ -122,3 +122,28 @@ test('a mismatched response type cannot be applied', async (t) => {
   mockResponse(t, { success: true, answerType: 'mcq', answer: 'A' });
   await assert.rejects(solveMcq({ q: 'How many?', answerType: 'numeric' }), /different question type/);
 });
+
+for (const answerType of ['mcq', 'numeric']) {
+  test(`${answerType} requests preserve ordered images and surface vision rejection without a text-only retry`, async (t) => {
+    const images = ['https://example.test/first.png', 'data:image/png;base64,aGVsbG8='];
+    const formatted = formatLlmPayload({ answerType, questionText: 'Read the diagrams',
+      options: [{ text: 'First' }], images });
+    assert.deepEqual(formatted.images, images);
+    let requests = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, options) => {
+      requests++;
+      const body = JSON.parse(options.body);
+      assert.deepEqual(body.images, images);
+      assert.equal(body.model, 'selected-model');
+      assert.equal(body.maxTokens, 512);
+      return { ok: false, status: 400, json: async () => ({ success: false, error: 'Model cannot process images' }) };
+    });
+    await assert.rejects(solveMcq(formatted, { model: 'selected-model', maxTokens: 512 }), /cannot process images/);
+    assert.equal(requests, 1);
+  });
+}
+
+test('unreadable or excessive diagrams cannot silently become a text-only payload', () => {
+  assert.throws(() => formatLlmPayload({ imageExtractionError: 'Question diagram could not be read' }), /could not be read/);
+  assert.throws(() => formatLlmPayload({ images: Array(4).fill('https://example.test/graph.png') }), /at most three/);
+});

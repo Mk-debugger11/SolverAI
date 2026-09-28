@@ -343,6 +343,103 @@ test('Qwen turbo disables reasoning on primary and fallback without affecting ot
   });
 });
 
+test('image questions preserve the selected model and image context in primary and fallback calls', async () => {
+  const images = ['https://images.example/diagram.png', 'data:image/png;base64,aGVsbG8='];
+  await withGroqResponses([
+    errorResponse(400, 'Failed to generate JSON', { code: 'json_validate_failed' }),
+    answerResponse(),
+  ], async ({ solveMcq, calls }) => {
+    const result = await solveMcq({ ...question, images });
+    assert.equal(result.answer, 'B');
+    assert.equal(result.modelUsed, question.model);
+    assert.equal(calls.length, 2);
+    for (const { body } of calls) {
+      assert.equal(body.model, question.model);
+      assert.deepEqual(body.messages[1].content, [
+        { type: 'text', text: JSON.stringify({ q: question.q, o: question.o }) },
+        ...images.map((url) => ({ type: 'image_url', image_url: { url } })),
+      ]);
+      assert.equal(body.max_tokens, 512);
+    }
+  });
+});
+
+test('image identity and order are included in cached question identity', async () => {
+  const images = ['https://images.example/one.png', 'https://images.example/two.png'];
+  await withGroqResponses(() => answerResponse(), async ({ solveMcq, calls }) => {
+    await solveMcq(question);
+    const first = await solveMcq({ ...question, images });
+    const repeated = await solveMcq({ ...question, images: [...images] });
+    const changed = await solveMcq({ ...question, images: [images[0]] });
+    const reordered = await solveMcq({ ...question, images: [...images].reverse() });
+    assert.equal(first.cacheHit, false);
+    assert.equal(repeated.cacheHit, true);
+    assert.equal(changed.cacheHit, false);
+    assert.equal(reordered.cacheHit, false);
+    assert.equal(calls.length, 4);
+  });
+});
+
+test('image rejection is visible without retrying as a text-only question', async () => {
+  await withGroqResponses([errorResponse(400, 'Invalid image data in image_url')], async ({ solveMcq, calls }) => {
+    await assert.rejects(solveMcq({ ...question, images: ['https://images.example/diagram.png'] }), {
+      status: 400, message: 'Invalid image data in image_url',
+    });
+    assert.equal(calls.length, 1);
+  });
+});
+
+test('invalid or excessive image context is rejected instead of silently discarded', async () => {
+  const inputs = [
+    'https://images.example/diagram.png',
+    [null],
+    ['https://images.example/diagram.SVG?size=2'],
+    ['blob:https://images.example/image'],
+    ['data:image/svg+xml;base64,aGVsbG8='],
+    ['data:image/png;garbage'],
+    ['https://username:password@images.example/diagram.png'],
+    Array(4).fill('https://images.example/diagram.png'),
+  ];
+  await withGroqResponses([], async ({ solveMcq, calls }) => {
+    for (const images of inputs) await assert.rejects(solveMcq({ ...question, images }), { status: 400 });
+    assert.equal(calls.length, 0);
+  });
+});
+
+test('numerical questions can include images without an options map', async () => {
+  const images = ['https://images.example/registers.webp'];
+  await withGroqResponses([answerResponse('6.0')], async ({ solveMcq, calls }) => {
+    const result = await solveMcq({ ...numericQuestion, images });
+    assert.equal(result.answer, '6.0');
+    assert.equal(result.answerType, 'numeric');
+    assert.deepEqual(calls[0].body.messages[1].content, [
+      { type: 'text', text: JSON.stringify({ q: numericQuestion.q }) },
+      { type: 'image_url', image_url: { url: images[0] } },
+    ]);
+  });
+});
+
+test('incoming structured answer aliases remain strict and cannot override a conflicting answer', async () => {
+  const aliases = ['option', 'choice', 'key', 'selected'];
+  await withGroqResponses((_, calls) => jsonResponse({
+    choices: [{ message: { content: JSON.stringify({ [aliases[calls.length - 1]]: 'B' }) } }],
+  }), async ({ solveMcq }) => {
+    for (const alias of aliases) assert.equal((await solveMcq({ ...question, q: question.q + alias })).answer, 'B');
+  });
+  await withGroqResponses([jsonResponse({ choices: [{ message: { content: '{"a":"B","choice":"C"}' } }] })], async ({ solveMcq }) => {
+    await assert.rejects(solveMcq(question), { status: 502 });
+  });
+});
+
+test('provider transport failure retains the incoming meaningful gateway error', async () => {
+  await withGroqResponses(() => { throw new Error('connection closed'); }, async ({ solveMcq, calls }) => {
+    await assert.rejects(solveMcq(question), {
+      status: 502, message: 'Network failure calling Groq API: connection closed',
+    });
+    assert.equal(calls.length, 1);
+  });
+});
+
 for (const value of ['0', 0, '-12', '-0.125', '6.0', '1.25e-3', '+2.5E+4', '.5']) {
   test(`numerical questions accept a finite numeric answer: ${JSON.stringify(value)}`, async () => {
     await withGroqResponses([answerResponse(value)], async ({ solveMcq, calls }) => {
@@ -464,10 +561,10 @@ test('unsupported answer types and MCQ payloads without options fail before a pr
   });
 });
 
-test('solve route forwards numeric answerType and accepts a request without options', async () => {
+test('solve route forwards numeric answerType and images without requiring options', async () => {
   const routePath = require.resolve('../routes/solveRoutes');
   const previousRoute = require.cache[routePath];
-  await withGroqResponses([answerResponse('6.0')], async () => {
+  await withGroqResponses([answerResponse('6.0')], async ({ calls }) => {
     delete require.cache[routePath];
     try {
       const router = require('../routes/solveRoutes');
@@ -477,10 +574,12 @@ test('solve route forwards numeric answerType and accepts a request without opti
         status(code) { throw new Error(`Unexpected route status: ${code}`); },
         json(body) { sent = body; },
       };
-      await handler({ body: numericQuestion }, response);
+      const images = ['https://images.example/registers.png'];
+      await handler({ body: { ...numericQuestion, images } }, response);
       assert.equal(sent.answer, '6.0');
       assert.equal(sent.answerType, 'numeric');
       assert.equal(sent.success, true);
+      assert.deepEqual(calls[0].body.messages[1].content[1], { type: 'image_url', image_url: { url: images[0] } });
     } finally {
       if (previousRoute) require.cache[routePath] = previousRoute;
       else delete require.cache[routePath];

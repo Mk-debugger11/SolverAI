@@ -1,4 +1,5 @@
 import React from 'react';
+import { IconZap, IconX, IconCheck } from './Icons';
 
 /**
  * SettingsDrawer: Drawer panel for configuring Groq API key, model,
@@ -22,9 +23,12 @@ export default function SettingsDrawer({
   return (
     <div className="settings-drawer">
       <div className="settings-header">
-        <h3>⚡ LLM Pipeline Settings</h3>
+        <h3 style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          <IconZap size={14} />
+          LLM Pipeline Settings
+        </h3>
         <button className="btn-close-sm" onClick={onClose} title="Close settings">
-          ✕
+          <IconX size={12} />
         </button>
       </div>
 
@@ -32,7 +36,12 @@ export default function SettingsDrawer({
         {/* Groq API Key */}
         <div className="settings-field">
           <label>
-            Groq API Key {serverHasGroqKey && <span className="badge-server-configured">✓ Configured in .env</span>}
+            Groq API Key{' '}
+            {serverHasGroqKey && (
+              <span className="badge-server-configured" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                <IconCheck size={10} /> Configured in .env
+              </span>
+            )}
           </label>
           <input
             type="password"
@@ -68,6 +77,7 @@ export default function SettingsDrawer({
             <option value="openai/gpt-oss-20b">openai/gpt-oss-20b</option>
             <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
             <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+            <option value="allam-2-7b">allam-2-7b</option>
           </select>
         </div>
 
@@ -95,7 +105,10 @@ export default function SettingsDrawer({
         {/* Turbo Mode Toggle */}
         <div className="settings-field">
           <label>
-            <span>⚡ Turbo Mode (compact answer)</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+              <IconZap size={13} />
+              Turbo Mode (compact answer)
+            </span>
             <button
               type="button"
               className={`toggle-switch-btn ${turboMode ? 'active' : ''}`}

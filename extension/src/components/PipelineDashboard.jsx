@@ -1,4 +1,5 @@
 import React from 'react';
+import { IconZap, IconInfo } from './Icons';
 
 /**
  * Displays measured request timing and whether the answer used an API call.
@@ -11,7 +12,10 @@ export default function PipelineDashboard({ pipelineResult }) {
       <div className="pipeline-header">
         <div className="pipeline-title">
           <span className="pipeline-pulse"></span>
-          <strong>⚡ LLM Pipeline {pipelineResult.status === 'completed' ? 'Completed' : 'Failed'}</strong>
+          <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <IconZap size={13} />
+            LLM Pipeline {pipelineResult.status === 'completed' ? 'Completed' : 'Failed'}
+          </strong>
         </div>
         {pipelineResult.timings?.total > 0 && (
           <div className="pipeline-total-time">
@@ -25,7 +29,9 @@ export default function PipelineDashboard({ pipelineResult }) {
           <div className="pipeline-answer-banner">
             <span className="pipeline-badge-ans">{pipelineResult.answerType === 'numeric' ? 'Filled:' : 'Chosen: Option'} {pipelineResult.answer}</span>
             {pipelineResult.turbo && (
-              <span className="pipeline-badge-turbo">Compact answer</span>
+              <span className="pipeline-badge-turbo" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <IconZap size={11} /> Compact answer
+              </span>
             )}
             {pipelineResult.cacheHit && <span className="pipeline-badge-conf">Cached · no API request</span>}
             {pipelineResult.deduplicated && <span className="pipeline-badge-conf">Shared request</span>}
@@ -33,8 +39,9 @@ export default function PipelineDashboard({ pipelineResult }) {
           </div>
 
           {pipelineResult.reason && (
-            <div className="pipeline-reason">
-              💡 {pipelineResult.reason}
+            <div className="pipeline-reason" style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+              <IconInfo size={13} style={{ flexShrink: 0, marginTop: '2px' }} />
+              <span>{pipelineResult.reason}</span>
             </div>
           )}
 

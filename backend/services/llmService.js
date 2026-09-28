@@ -27,6 +27,24 @@ function effectiveTokenLimit(requested, turbo) {
   return Number.isSafeInteger(tokens) && tokens > 0 ? Math.min(tokens, limit) : limit;
 }
 
+function normalizeImages(images) {
+  if (!Array.isArray(images) || images.length > 3) {
+    throw requestError('Invalid images: provide an array containing at most three images.');
+  }
+  for (const image of images) {
+    let valid = typeof image === 'string' && /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(image);
+    if (!valid && typeof image === 'string') {
+      try {
+        const url = new URL(image);
+        valid = ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password &&
+          !/\.svg$/i.test(url.pathname);
+      } catch {}
+    }
+    if (!valid) throw requestError('Invalid image: use a JPEG, PNG or WEBP base64 data URL, or a non-SVG HTTP(S) image URL.');
+  }
+  return images.slice();
+}
+
 function optionKey(value, options) {
   if (typeof value !== 'string') return null;
   const answer = value.trim();
@@ -68,7 +86,7 @@ function parseAnswer(content, options, answerType) {
 
   const isObject = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
   const candidates = isObject
-    ? ['a', 'answer', 'ans'].filter((key) => Object.hasOwn(parsed, key)).map((key) => parsed[key])
+    ? ['a', 'answer', 'ans', 'option', 'choice', 'key', 'selected'].filter((key) => Object.hasOwn(parsed, key)).map((key) => parsed[key])
     : [parsed];
   const answers = candidates.map((candidate) => answerType === 'numeric'
     ? numericAnswer(candidate) : optionKey(candidate, options));
@@ -119,7 +137,16 @@ async function providerError(response) {
   };
 }
 
-async function queryProvider({ q, o, answerType, apiKey, model, turbo, maxTokens }) {
+async function requestProvider(apiKey, body) {
+  try {
+    return await requestGroq(apiKey, body);
+  } catch (error) {
+    if (error.status) throw error;
+    throw requestError(`Network failure calling Groq API: ${error.message}`, 502);
+  }
+}
+
+async function queryProvider({ q, o, images, answerType, apiKey, model, turbo, maxTokens }) {
   const task = answerType === 'numeric'
     ? 'Solve the numerical question, following its stated rounding and precision requirements. The answer must be a single finite decimal or scientific-notation number as a string, without units, fractions, expressions, lists or prose.'
     : 'Choose the single correct key from the supplied options.';
@@ -127,7 +154,11 @@ async function queryProvider({ q, o, answerType, apiKey, model, turbo, maxTokens
   const systemPrompt = task + (turbo
     ? ` Return only JSON {"a":"${answerValue}"}.`
     : ` Return JSON {"a":"${answerValue}","reason":"<brief explanation>"}. Keep the explanation to one or two sentences.`);
-  const userContent = JSON.stringify(answerType === 'numeric' ? { q } : { q, o });
+  const questionText = JSON.stringify(answerType === 'numeric' ? { q } : { q, o });
+  const userContent = images.length ? [
+    { type: 'text', text: questionText },
+    ...images.map((url) => ({ type: 'image_url', image_url: { url } })),
+  ] : questionText;
   const body = {
     model,
     messages: [
@@ -139,7 +170,7 @@ async function queryProvider({ q, o, answerType, apiKey, model, turbo, maxTokens
     ...(turbo && model === 'qwen/qwen3.8-27b' ? { reasoning_effort: 'none' } : {}),
     response_format: { type: 'json_object' },
   };
-  let response = await requestGroq(apiKey, body);
+  let response = await requestProvider(apiKey, body);
   let recovered = false;
 
   if (!response.ok) {
@@ -161,7 +192,7 @@ async function queryProvider({ q, o, answerType, apiKey, model, turbo, maxTokens
       }
     }
 
-    response = await requestGroq(apiKey, {
+    response = await requestProvider(apiKey, {
       ...body,
       messages: [
         {
@@ -192,6 +223,7 @@ async function solveMcq({
   q,
   o,
   answerType = 'mcq',
+  images = [],
   apiKey: clientApiKey,
   model: clientModel,
   turbo = true,
@@ -209,6 +241,7 @@ async function solveMcq({
     throw requestError('Invalid payload: "q" must be a question and "o" must map option keys to text.');
   }
 
+  const questionImages = normalizeImages(images);
   const apiKey = (clientApiKey || process.env.GROQ_API_KEY || '').trim();
   if (!apiKey) {
     throw requestError('Groq API Key is missing. Add GROQ_API_KEY to backend/.env or enter it in extension settings.');
@@ -222,6 +255,7 @@ async function solveMcq({
     model,
     q,
     answerType,
+    images: questionImages,
     options: answerType === 'mcq' ? Object.entries(o).sort(([left], [right]) => left.localeCompare(right)) : null,
     turbo: isTurbo,
     maxTokens,
@@ -230,7 +264,7 @@ async function solveMcq({
 
   try {
     const cached = await solutionCache.getOrCreate(cacheKey, () => queryProvider({
-      q, o, answerType, apiKey, model, turbo: isTurbo, maxTokens,
+      q, o, images: questionImages, answerType, apiKey, model, turbo: isTurbo, maxTokens,
     }));
     // Callers receive separate objects so changing a response cannot change the cache.
     const result = structuredClone(cached.value);

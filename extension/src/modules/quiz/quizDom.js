@@ -16,7 +16,7 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
 
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    func: (isLightweight) => {
+    func: async (isLightweight) => {
       // Extract clean text while preserving LaTeX formulas from KaTeX elements
       const extractCleanMathText = (el) => {
         if (!el) return '';
@@ -39,10 +39,71 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
           }
         });
 
-        clone.querySelectorAll('svg, math').forEach((s) => s.remove());
+        clone.querySelectorAll('svg').forEach((s) => s.remove());
+        clone.querySelectorAll('math').forEach((math) => {
+          const value = (math.getAttribute('alttext') || math.textContent || '').trim();
+          if (value) math.parentNode?.replaceChild(document.createTextNode(` ${value} `), math);
+          else math.remove();
+        });
         return (clone.innerText || clone.textContent || '')
           .replace(/\s+/g, ' ')
           .trim();
+      };
+
+      // Preserve diagrams in the solver payload. Failed extraction is explicit:
+      // solving the text alone can change the question's meaning.
+      const extractImages = async (root) => {
+        const images = [];
+        const rasterize = (node, width, height) => {
+          const scale = Math.min(1, 500 / Math.max(width, height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(width * scale));
+          canvas.height = Math.max(1, Math.round(height * scale));
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error('Canvas rendering is unavailable.');
+          context.fillStyle = '#ffffff';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(node, 0, 0, canvas.width, canvas.height);
+          return canvas.toDataURL('image/jpeg', 0.8);
+        };
+        try {
+          for (const node of root?.querySelectorAll?.('img, svg') || []) {
+            const tag = node.tagName.toLowerCase();
+            const rect = node.getBoundingClientRect();
+            if (!rect.width || !rect.height) continue;
+            const src = node.currentSrc || node.src || node.getAttribute('src') || '';
+            if (/^(?:status|avatar|user avatar|logo|profile picture)$/i.test(node.alt || '') || /avatar|profile|questionStatus\//i.test(src)) continue;
+            let data;
+            if (tag === 'img') {
+              if (!src) throw new Error('A question image has no source.');
+              try { data = rasterize(node, node.naturalWidth || rect.width, node.naturalHeight || rect.height); }
+              catch {
+                if (/^https?:/i.test(src) && !/\.svg(?:[?#]|$)/i.test(src) || /^data:image\/(?:jpeg|png|webp);base64,/i.test(src)) data = src;
+                else throw new Error('A question image could not be read.');
+              }
+            } else {
+              if (rect.width < 50 || rect.height < 50 || node.closest?.('.katex, .katex-html') ||
+                  node.querySelectorAll('circle, path, line, rect, text, polygon').length < 2) continue;
+              const blob = new Blob([new XMLSerializer().serializeToString(node)], { type: 'image/svg+xml;charset=utf-8' });
+              const url = URL.createObjectURL(blob);
+              try {
+                data = await new Promise((resolve, reject) => {
+                  const img = new Image();
+                  const timer = setTimeout(() => { img.onload = null; img.onerror = null; reject(new Error('A question diagram did not render in time.')); }, 1000);
+                  img.onload = () => {
+                    clearTimeout(timer);
+                    try { resolve(rasterize(img, rect.width, rect.height)); } catch (error) { reject(error); }
+                  };
+                  img.onerror = () => { clearTimeout(timer); reject(new Error('A question diagram could not be rendered.')); };
+                  img.src = url;
+                });
+              } finally { URL.revokeObjectURL(url); }
+            }
+            if (data && !images.includes(data)) images.push(data);
+            if (images.length > 3) throw new Error('The question has more than three images; its visual content cannot be discarded.');
+          }
+          return images.length ? { images } : {};
+        } catch (error) { return { images, imageExtractionError: error.message }; }
       };
 
       const radioInputs = Array.from(document.querySelectorAll('input[type="radio"]'));
@@ -64,8 +125,8 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
       const parentContainerElements = [];
       const questionElements = new Map();
 
-      Object.entries(groups).forEach(([groupName, radios], gIdx) => {
-        if (!radios.length) return;
+      for (const [gIdx, [groupName, radios]] of Object.entries(groups).entries()) {
+        if (!radios.length) continue;
 
         let commonParent = radios[0].parentElement;
         while (commonParent && commonParent !== document.body) {
@@ -140,6 +201,16 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
           questionText = `Question ${gIdx + 1}`;
         }
 
+        // Unstyled badges are safe to strip only when every label repeats the
+        // same leading A/B/C sequence and has a separate choice-text sibling.
+        const leadingLabelParts = (label) => Array.from(label?.children || []).filter(
+          (child) => child.tagName?.toLowerCase() !== 'input' && (child.textContent || '').trim()
+        );
+        const hasSequentialBadges = radios.length > 1 && radios.every((radio, index) => {
+          const parts = leadingLabelParts(radio.closest('label'));
+          return parts.length > 1 && !parts[0].children.length &&
+            (parts[0].textContent || '').trim() === String.fromCharCode(65 + index);
+        });
         const options = radios.map((radio, rIdx) => {
           let labelText = '';
           let labelEl = radio.closest('label');
@@ -149,37 +220,21 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
             } catch {}
           }
 
-          let badgeLetter = '';
-          if (labelEl) {
-            // Find leaf badge element with single letter A-Z
-            const badgeCandidates = Array.from(
-              labelEl.querySelectorAll(
-                '.kuwkNu, .bIKUCi, [class*="kuwkNu"], [class*="bIKUCi"], [class*="badge" i], [class*="letter" i], div, span, b, strong'
-              )
-            );
-            for (const el of badgeCandidates) {
-              if (el.children.length === 0) {
-                const bTxt = (el.innerText || el.textContent || '').trim();
-                if (/^[A-Z]$/i.test(bTxt)) {
-                  badgeLetter = bTxt.toUpperCase();
-                  break;
-                }
-              }
-            }
-          }
-          if (!badgeLetter) {
-            badgeLetter = String.fromCharCode(65 + rIdx);
-          }
+          const badgeLetter = String.fromCharCode(65 + rIdx);
 
           if (labelEl) {
             const labelClone = labelEl.cloneNode(true);
             labelClone.querySelectorAll('input[type="radio"], svg').forEach((el) => el.remove());
-            // Strip the badge element itself from clone so it doesn't pollute clean option text
+            // Strip only a dedicated badge; a lone math/code variable is content.
             const cloneCandidates = Array.from(
               labelClone.querySelectorAll(
-                '.kuwkNu, .bIKUCi, [class*="kuwkNu"], [class*="bIKUCi"], [class*="badge" i], [class*="letter" i], div, span, b, strong'
+                '.kuwkNu, .bIKUCi, [class*="kuwkNu"], [class*="bIKUCi"], [class*="badge" i], [class*="letter" i]'
               )
             );
+            if (!cloneCandidates.length && hasSequentialBadges) {
+              const leading = leadingLabelParts(labelClone)[0];
+              if (leading) cloneCandidates.push(leading);
+            }
             for (const cEl of cloneCandidates) {
               if (cEl.children.length === 0 && (cEl.textContent || '').trim().toUpperCase() === badgeLetter) {
                 cEl.remove();
@@ -210,7 +265,7 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
             optionId = `${groupName}_opt_${rIdx + 1}`;
           }
 
-          const cleanText = labelText.replace(/^[A-Z][\.\:\)\-\s]+/i, '').trim() || labelText;
+          const cleanText = labelText.trim();
 
           // Multi-signal detection if this option is already selected on page
           let isSelected = Boolean(radio.checked);
@@ -266,6 +321,7 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
           optionsMap[key] = opt.text;
         });
 
+        const visual = await extractImages(commonParent);
         const question = {
           answerType: 'mcq',
           questionIndex: gIdx + 1,
@@ -273,9 +329,11 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
           questionText,
           groupName,
           options,
+          ...visual,
           llmPayload: {
             q: questionText,
             o: optionsMap,
+            ...(visual.images?.length ? { images: visual.images } : {}),
           },
         };
         extractedQuestions.push(question);
@@ -284,7 +342,7 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
         if (!isLightweight && commonParent && !parentContainerElements.includes(commonParent)) {
           parentContainerElements.push(commonParent);
         }
-      });
+      }
 
       // Numerical fields must belong to a question block. The puzzle marker and
       // block class are used by Newton's editable revision view as well as quizzes.
@@ -359,9 +417,11 @@ export async function extractQuizQuestionsFromPage(tabId, lightweight = false) {
           containerPath,
           inputValue,
         };
+        const visual = await extractImages(container);
         const question = {
           answerType: 'numeric', questionId, questionText, options: [], inputValue, targetDescriptor,
-          llmPayload: { q: questionText, answerType: 'numeric' },
+          ...visual,
+          llmPayload: { q: questionText, answerType: 'numeric', ...(visual.images?.length ? { images: visual.images } : {}) },
         };
         extractedQuestions.push(question);
         questionElements.set(question, heading);
@@ -535,38 +595,27 @@ export async function clickQuizOptionOnPage(tabId, targetDescriptor, optIndex = 
         let target = null;
         let matchedBy = 'none';
 
-        // 1. Strategy 1: Match by visual badge letter within group (Ground truth on Newton School & standard MCQs)
-        if (targetLetter && groupRadios.length > 0) {
-          for (const radio of groupRadios) {
-            const label = radio.closest('label');
-            if (label) {
-              const candidates = Array.from(label.querySelectorAll('div, span, b, strong, p'));
-              const hasBadge = candidates.some((el) => {
-                const t = (el.innerText || el.textContent || '').trim().toUpperCase();
-                return t === targetLetter && el.children.length === 0;
-              });
-              if (hasBadge) {
-                target = radio;
-                matchedBy = `badge_letter_${targetLetter}`;
-                break;
-              }
-            }
-          }
+        // Extraction assigns canonical A/B/C keys in DOM order. Resolve that
+        // exact group position before considering any text inside the choice.
+        const letterIndex = targetLetter ? targetLetter.charCodeAt(0) - 65 : -1;
+        const optionIndex = typeof desc?.index === 'number' && desc.index >= 0
+          ? desc.index : letterIndex >= 0 ? letterIndex : fallbackIndex;
+        if (Number.isInteger(optionIndex) && optionIndex >= 0 && groupRadios[optionIndex]) {
+          target = groupRadios[optionIndex];
+          matchedBy = `group_index_${optionIndex}`;
         }
 
-        // 2. Strategy 2: Match by position index within group (0 = A, 1 = B, 2 = C, 3 = D)
-        if (!target && groupRadios.length > 0) {
-          const letterIndex = targetLetter ? targetLetter.charCodeAt(0) - 65 : -1;
-          const optIdx =
-            typeof desc?.index === 'number' && desc.index >= 0
-              ? desc.index
-              : letterIndex >= 0
-              ? letterIndex
-              : fallbackIndex;
-
-          if (typeof optIdx === 'number' && optIdx >= 0 && groupRadios[optIdx]) {
-            target = groupRadios[optIdx];
-            matchedBy = `group_index_${optIdx}`;
+        if (!target && targetLetter && groupRadios.length > 0) {
+          for (const radio of groupRadios) {
+            const label = radio.closest('label') || document.querySelector(`label[for="${CSS.escape(radio.id || '')}"]`);
+            const badge = label?.querySelector(
+              '.kuwkNu, .bIKUCi, [class*="kuwkNu"], [class*="bIKUCi"], [class*="badge" i], [class*="letter" i]'
+            );
+            if (badge && (badge.textContent || '').trim().toUpperCase() === targetLetter) {
+              target = radio;
+              matchedBy = `badge_letter_${targetLetter}`;
+              break;
+            }
           }
         }
 
@@ -1361,6 +1410,8 @@ export async function handleStartOrInstructionsPage(tabId) {
           'attempt now',
           'begin assessment',
           'begin quiz',
+          'launch assessment',
+          'begin',
           'attempt',
           'start',
           'proceed',
@@ -1368,8 +1419,14 @@ export async function handleStartOrInstructionsPage(tabId) {
         ];
 
         const allButtons = Array.from(
-          document.querySelectorAll('button:not([disabled]), [role="button"]:not([disabled]), a:not([disabled])')
-        );
+          document.querySelectorAll(
+            'button:not([disabled]), [role="button"]:not([disabled]), a:not([disabled]), div[class*="button" i]:not([disabled]), div[class*="btn" i]:not([disabled]), span[class*="button" i]:not([disabled])'
+          )
+        ).filter((button) => {
+          if (button.getAttribute('aria-disabled') === 'true' || !button.getClientRects().length) return false;
+          const text = (button.innerText || button.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          return !/\b(back|download|logout|cancel|close|submit)\b/.test(text);
+        });
 
         let targetBtn = allButtons.find((btn) => {
           const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
@@ -1444,17 +1501,20 @@ export async function handleStartOrInstructionsPage(tabId) {
  * Automatically handles instructions / start buttons if encountered during polling.
  *
  * @param {number} tabId
- * @param {number} [timeoutMs=20000]
+ * @param {number} [timeoutMs=30000]
  * @returns {Promise<Object>}
  */
-export async function waitForQuizQuestionsToLoad(tabId, timeoutMs = 20000) {
+export async function waitForQuizQuestionsToLoad(tabId, timeoutMs = 30000, isRunning = () => true) {
   const startTime = Date.now();
 
-  while (Date.now() - startTime < timeoutMs) {
-    // 1. Check if instructions/start button is on page, and click it
-    await handleStartOrInstructionsPage(tabId);
+  while (Date.now() - startTime < timeoutMs && isRunning()) {
+    // Give React time to mount after Start, and check cancellation before retrying.
+    const startResult = await handleStartOrInstructionsPage(tabId);
+    if (!isRunning()) return { ready: false, cancelled: true };
+    if (startResult?.handled) await new Promise((resolve) => setTimeout(resolve, 1000));
+    if (!isRunning()) return { ready: false, cancelled: true };
 
-    // 2. Check if supported questions are present in DOM
+    // Check if supported questions are present in DOM
     try {
       const domData = await extractQuizQuestionsFromPage(tabId, true);
       if (domData?.questions?.length > 0) {

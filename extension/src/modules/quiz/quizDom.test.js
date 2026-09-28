@@ -131,6 +131,14 @@ class ElementFixture {
     this.visibility = 'visible';
   }
 
+  get parentNode() { return this.parentElement; }
+  replaceChild(replacement, previous) {
+    const index = this.children.indexOf(previous);
+    assert.ok(index >= 0);
+    replacement.parentElement = this;
+    previous.parentElement = null;
+    this.children[index] = replacement;
+  }
   get id() { return this.getAttribute('id') || ''; }
   get className() { return this.getAttribute('class') || ''; }
   get innerText() { return this.text + this.children.map((child) => child.innerText).join(''); }
@@ -465,3 +473,39 @@ for (const [path, isCatalog] of [
     assert.equal(result.error, undefined);
   });
 }
+
+test('question images retain their URL when canvas access is unavailable, and excessive images fail explicitly', async () => {
+  const fixture = numericalFixture();
+  fixture.context.document.createElement = () => { throw new Error('Canvas access blocked'); };
+  const addImage = (src) => {
+    const image = new ElementFixture('img', { src });
+    image.getBoundingClientRect = () => ({ width: 300, height: 200 });
+    fixture.block.append(image);
+  };
+  addImage('https://example.test/graph.png');
+  let data = await fixture.extract();
+  assert.equal(data.questions[0].llmPayload.images[0], 'https://example.test/graph.png');
+  for (let index = 0; index < 3; index++) addImage(`https://example.test/graph-${index}.png`);
+  data = await fixture.extract();
+  assert.match(data.questions[0].imageExtractionError, /more than three images/);
+});
+
+test('canonical choice letters never remove an unrelated leading math variable', async () => {
+  const fixture = numericalFixture({ withMcqs: true });
+  const choice = fixture.body.children[1].children[1];
+  choice.children[1].text = 'X';
+  choice.children[2].text = ' @ theta';
+  const data = await fixture.extract();
+  assert.equal(data.questions[1].options[0].optionLetter, 'A');
+  assert.equal(data.questions[1].options[0].text, 'X @ theta');
+});
+
+test('standalone MathML is retained as readable text without modifying the original question', async () => {
+  const fixture = numericalFixture();
+  const math = new ElementFixture('math', { alttext: 'x squared' }, 'x2');
+  fixture.heading.append(math);
+  fixture.context.document.createTextNode = (value) => new ElementFixture('text', {}, value);
+  const data = await fixture.extract();
+  assert.match(data.questions[0].questionText, /x squared/);
+  assert.equal(fixture.heading.querySelector('math'), math);
+});

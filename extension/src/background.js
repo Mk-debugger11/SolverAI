@@ -8,7 +8,7 @@ import { assignmentApi } from './modules/assignments/assignmentApi';
 import { portalSubmission } from './modules/assignments/portalSubmission';
 import { createBatchAssignmentRunner } from './modules/assignments/batchAssignmentRunner';
 
-console.log('DOM Fetcher Service Worker loaded and active.');
+console.log('Solver.Ai Service Worker loaded and active.');
 
 // Global background state
 let isBatchRunning = false;
@@ -221,7 +221,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     autoSolvedList = [];
     lastStatusMessage = {
       type: 'info',
-      text: '🚀 Background Batch Auto-Solve starting across assessments catalog...',
+      text: 'Background Batch Auto-Solve starting across assessments catalog...',
     };
 
     startKeepAlive();
@@ -273,7 +273,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         isBatchRunning = false;
         activeBatchRef.current = false;
         stopKeepAlive();
-        if (result?.success) updateBadge('✓', '#10b981');
+        if (result?.success) updateBadge('DONE', '#10b981');
         else clearBadge();
         broadcast({ type: 'BATCH_COMPLETE', completedQuizzes: batchCompletedQuizzes, result });
       },
@@ -311,7 +311,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     autoSolvedList = [];
     lastStatusMessage = {
       type: 'info',
-      text: '🚀 Starting Full Quiz Auto-Solve in background...',
+      text: 'Starting Full Quiz Auto-Solve in background...',
     };
 
     startKeepAlive();
@@ -354,7 +354,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         isSingleRunning = false;
         activeSingleRef.current = false;
         stopKeepAlive();
-        if (res?.success) updateBadge('✓', '#10b981');
+        if (res?.success) updateBadge('DONE', '#10b981');
         else clearBadge();
         broadcast({ type: 'SINGLE_COMPLETE', result: res });
       },

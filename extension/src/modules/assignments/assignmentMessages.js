@@ -1,5 +1,5 @@
 export const ASSIGNMENT_PROTOCOL_VERSION = 2;
-const RELOAD = 'Reload DOM Fetcher in chrome://extensions, then close and reopen its popup or floating dashboard.';
+const RELOAD = 'Reload Solver.Ai in chrome://extensions, then close and reopen its popup or floating dashboard.';
 
 function send(runtime, message, timeoutMs) {
   return new Promise((resolve, reject) => {

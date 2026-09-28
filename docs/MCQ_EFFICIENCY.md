@@ -55,6 +55,6 @@ npm run build:extension
 
 Tests mock the provider and Chrome APIs. They do not send questions to Groq or change portal answers.
 
-Restart `npm run dev:server` if needed, then click Reload on DOM Fetcher (MERN) at `chrome://extensions`. Load `extension/dist` if this is the first installation.
+Restart `npm run dev:server` if needed, then click Reload on Solver.Ai at `chrome://extensions`. Load `extension/dist` if this is the first installation.
 
 Use Inspect DOM to confirm the extracted question/options. On a practice question, Solve Current selects its result automatically. Repeating an identical request during the cache lifetime should show Cached and make no new provider call. Changing options, model or mode should create a new request. Keep Turbo on for compact output.

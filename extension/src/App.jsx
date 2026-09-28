@@ -6,6 +6,7 @@ import SettingsDrawer from './components/SettingsDrawer';
 import StatusBanner from './components/StatusBanner';
 import PipelineDashboard from './components/PipelineDashboard';
 import HistoryView from './components/HistoryView';
+import { IconCrosshair, IconHistory, IconZap, IconCpu } from './components/Icons';
 
 // Quiz Module
 import {
@@ -241,7 +242,7 @@ export default function App() {
       if (info.isCatalog && info.unsolvedCount > 0) {
         setStatusMessage({
           type: 'info',
-          text: `📋 Assessments Catalog: ${info.unsolvedCount} unsolved quiz(zes) pending!`,
+          text: `Assessments Catalog: ${info.unsolvedCount} unsolved quiz(zes) pending!`,
         });
       }
       return info;
@@ -612,7 +613,7 @@ export default function App() {
     if (currentCatalog?.isCatalog) {
       setStatusMessage({
         type: 'info',
-        text: '📋 You are on the Assessments Catalog page! Use "Batch Auto-Solve All Unsolved Quizzes" below, or click an assessment card to open it first.',
+        text: 'You are on the Assessments Catalog page! Use "Batch Auto-Solve All Unsolved Quizzes" below, or click an assessment card to open it first.',
       });
       return;
     }
@@ -620,7 +621,7 @@ export default function App() {
     setAutoRunning(true);
     autoRunningRef.current = true;
     setAutoSolvedList([]);
-    setStatusMessage({ type: 'info', text: '🚀 Starting Full Quiz Auto-Solve in background...' });
+    setStatusMessage({ type: 'info', text: 'Starting Full Quiz Auto-Solve in background...' });
 
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({
@@ -664,7 +665,7 @@ export default function App() {
     setAutoSolvedList([]);
     setStatusMessage({
       type: 'info',
-      text: '🚀 Starting Batch Auto-Solve in background (runs persistently across tabs)...',
+      text: 'Starting Batch Auto-Solve in background (runs persistently across tabs)...',
     });
 
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -703,14 +704,14 @@ export default function App() {
     try {
       lease = await acquireQuizActionLease();
       await lease.check();
-      setStatusMessage({ type: 'info', text: '⚡ Submitting quiz on webpage...' });
+      setStatusMessage({ type: 'info', text: 'Submitting quiz on webpage...' });
       const res = await clickSubmitQuizOnPage(activeTab?.id);
       if (res.success) {
         setStatusMessage({
           type: 'success',
           text: res.confirmed
-            ? '🎉 Quiz Submitted & Confirmed Successfully!'
-            : '✓ Submit Quiz clicked on webpage!',
+            ? 'Quiz submitted successfully.'
+            : 'Submit Quiz clicked on webpage.',
         });
       } else {
         setStatusMessage({
@@ -817,7 +818,7 @@ export default function App() {
           className={`tab-btn ${view === 'capture' ? 'active' : ''}`}
           onClick={() => setView('capture')}
         >
-          Quizzes
+          <IconCrosshair size={13} style={{ marginRight: '6px' }} />Quizzes
         </button>
         <button className={`tab-btn ${view === 'assignments' ? 'active' : ''}`} onClick={() => setView('assignments')}>
           Assignments
@@ -829,7 +830,7 @@ export default function App() {
             loadHistory();
           }}
         >
-          History ({history.length})
+          <IconHistory size={13} style={{ marginRight: '6px' }} />History ({history.length})
         </button>
       </nav>
 
@@ -857,7 +858,7 @@ export default function App() {
 
             <div className="turbo-toggle-bar">
               <div className="turbo-info">
-                <span className="turbo-flame">{turboMode ? '⚡' : '🧠'}</span>
+                <span className="turbo-flame">{turboMode ? <IconZap size={14} /> : <IconCpu size={14} />}</span>
                 <span className="turbo-title">{turboMode ? 'Turbo Mode' : 'Detailed Mode'}</span>
                 <span className={`turbo-badge ${turboMode ? 'active' : 'detailed'}`}>
                   {turboMode ? 'Compact answer' : 'Brief explanation'}

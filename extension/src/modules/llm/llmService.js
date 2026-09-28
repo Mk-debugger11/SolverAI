@@ -19,17 +19,24 @@ export function normalizeNumericAnswer(value) {
  */
 export function formatLlmPayload(question) {
   if (!question) return { q: '', o: {} };
+  if (question.imageExtractionError) throw new Error(question.imageExtractionError);
+  const images = question.llmPayload?.images ?? question.images ?? [];
+  if (!Array.isArray(images) || images.some((image) => typeof image !== 'string') || images.length > 3) {
+    throw new Error('A question may contain at most three supported images. Its visual content cannot be discarded.');
+  }
+  const imagePayload = images.length ? { images: [...images] } : {};
 
   if ((question.answerType || question.llmPayload?.answerType) === 'numeric') {
     return {
       q: (question.llmPayload?.q || question.questionText || question.question || '').trim(),
       answerType: 'numeric',
+      ...imagePayload,
     };
   }
 
   // Use pre-computed llmPayload if available
   if (question.llmPayload && question.llmPayload.q && question.llmPayload.o) {
-    return { q: question.llmPayload.q, o: question.llmPayload.o };
+    return { q: question.llmPayload.q, o: question.llmPayload.o, ...imagePayload };
   }
 
   const optionsMap = {};
@@ -43,6 +50,7 @@ export function formatLlmPayload(question) {
   return {
     q: (question.questionText || question.question || '').trim(),
     o: optionsMap,
+    ...imagePayload,
   };
 }
 
@@ -89,6 +97,7 @@ export async function solveMcq(payload, config = {}) {
       q: payload.q,
       o: answerType === 'mcq' ? payload.o : undefined,
       answerType,
+      images: payload.images?.length ? payload.images : undefined,
       apiKey: apiKey ? apiKey.trim() : undefined,
       model: model ? model.trim() : undefined,
       turbo: Boolean(turbo),

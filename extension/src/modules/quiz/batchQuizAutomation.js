@@ -54,6 +54,14 @@ export async function runBatchQuizAutomation({
   const successfulQuizzes = [];
   const failedQuizzes = [];
   let batchError = null;
+  let consecutiveFailures = 0;
+  const isQuizUrl = (value) => {
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' && url.hostname === 'my.newtonschool.co' &&
+        /^\/course\/[^/]+\/assessment\/[^/]+\/?$/.test(url.pathname);
+    } catch { return false; }
+  };
 
   const makeQuizKey = (q) => `${q.subject || ''}:::${q.title || ''}:::${q.date || ''}`;
 
@@ -61,6 +69,7 @@ export async function runBatchQuizAutomation({
     // 1. Initial Catalog Detection
     let catalogInfo = await detectAssessmentsCatalog(tabId);
     let catalogUrl = catalogInfo.currentUrl;
+    if (!isBatchRunningRef.current) return;
 
     if (!catalogInfo.isCatalog) {
       // Check if user is on a course sub-page (e.g. /details or /assessment/...)
@@ -117,6 +126,8 @@ export async function runBatchQuizAutomation({
     while (isBatchRunningRef.current) {
       // Re-scan catalog to get current state
       const liveCatalog = await detectAssessmentsCatalog(tabId);
+      if (!isBatchRunningRef.current) break;
+      if (!liveCatalog.isCatalog) throw new Error('The catalog tab changed. Batch automation stopped.');
       const pendingQuizzes = (liveCatalog.quizzes || []).filter(
         (q) => q.isUnsolved && !attemptedQuizKeys.has(makeQuizKey(q))
       );
@@ -150,68 +161,58 @@ export async function runBatchQuizAutomation({
         totalQuizzes: totalToSolve,
       });
 
-      // 3. Click the assessment card to open the quiz (targeting by title and subject first)
-      let existingTabIds = new Set();
-      if (typeof chrome !== 'undefined' && chrome.tabs) {
-        try {
-          const winTabs = await chrome.tabs.query({ currentWindow: true });
-          existingTabIds = new Set(winTabs.map((t) => t.id));
-        } catch {}
-      }
-
-      const clickRes = await clickQuizCardOnCatalog(tabId, {
-        title: currentQuiz.title,
-        subject: currentQuiz.subject,
-        cardIndex: currentQuiz.cardIndex,
-      });
-      if (!clickRes.success) {
-        throw new Error(`Failed to open quiz card "${currentQuiz.title}": ${clickRes.error}`);
-      }
-
-      // Detect if click spawned a new tab or navigated current tab
+      // Observe tabs before the click. Only a tab opened by this catalog is
+      // eligible; unrelated tabs are never selected or closed.
       let quizTabId = tabId;
       let openedInNewTab = false;
+      let openedReady = false;
+      const createdTabs = new Map();
+      const onCreated = (tab) => {
+        if (tab.openerTabId === tabId) createdTabs.set(tab.id, tab);
+      };
+      chrome.tabs.onCreated?.addListener(onCreated);
+      try {
+        const catalogTab = await chrome.tabs.get(tabId);
+        const query = Number.isInteger(catalogTab.windowId) ? { windowId: catalogTab.windowId } : {};
+        const before = await chrome.tabs.query(query);
+        const existingIds = new Set(before.map((tab) => tab.id));
+        if (!isBatchRunningRef.current) break;
+        const clickRes = await clickQuizCardOnCatalog(tabId, {
+          title: currentQuiz.title,
+          subject: currentQuiz.subject,
+          cardIndex: currentQuiz.cardIndex,
+        });
+        if (!clickRes.success) throw new Error(`Failed to open quiz card "${currentQuiz.title}": ${clickRes.error}`);
 
-      for (let i = 0; i < 20; i++) {
-        await new Promise((r) => setTimeout(r, 200));
-        if (typeof chrome !== 'undefined' && chrome.tabs) {
-          try {
-            const currentTabs = await chrome.tabs.query({ currentWindow: true });
-            const newTabs = currentTabs.filter((t) => !existingTabIds.has(t.id));
-            if (newTabs.length > 0) {
-              const primaryNewTab = newTabs[0];
-              quizTabId = primaryNewTab.id;
-              openedInNewTab = true;
-
-              // If multiple tabs were accidentally created, close duplicates immediately
-              if (newTabs.length > 1) {
-                for (let k = 1; k < newTabs.length; k++) {
-                  try {
-                    await chrome.tabs.remove(newTabs[k].id);
-                  } catch {}
-                }
-              }
-
-              await chrome.tabs.update(quizTabId, { active: true });
-              break;
-            }
-          } catch {}
+        for (let poll = 0; poll < 120 && isBatchRunningRef.current; poll++) {
+          const tabs = await chrome.tabs.query(query);
+          if (!isBatchRunningRef.current) break;
+          for (const tab of tabs) {
+            if (!existingIds.has(tab.id) && tab.openerTabId === tabId) createdTabs.set(tab.id, tab);
+          }
+          const candidates = [...createdTabs.values()].filter((tab) => !existingIds.has(tab.id));
+          if (candidates.length > 1) throw new Error('The quiz opened multiple tabs. Leave them open and select the intended quiz manually.');
+          if (candidates.length === 1) {
+            quizTabId = candidates[0].id;
+            openedInNewTab = true;
+          }
+          const current = await chrome.tabs.get(quizTabId);
+          if (!isBatchRunningRef.current) break;
+          if (isQuizUrl(current.url) && current.status === 'complete') {
+            openedReady = true;
+            break;
+          }
+          if (openedInNewTab && current.status === 'complete' && current.url && current.url !== 'about:blank') {
+            throw new Error('The new tab is not a supported Newton quiz. It has been left open.');
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
         }
+      } finally {
+        chrome.tabs.onCreated?.removeListener(onCreated);
       }
-
-      if (openedInNewTab) {
-        // Wait for tab document to reach complete status
-        for (let wait = 0; wait < 25; wait++) {
-          try {
-            const tInfo = await chrome.tabs.get(quizTabId);
-            if (tInfo && tInfo.status === 'complete') {
-              break;
-            }
-          } catch {}
-          await new Promise((r) => setTimeout(r, 200));
-        }
-      }
-
+      if (!isBatchRunningRef.current) break;
+      if (!openedReady) throw new Error('The quiz tab could not be identified or did not finish loading. Opened tabs have been left unchanged.');
+      await chrome.tabs.update(quizTabId, { active: true });
       if (!isBatchRunningRef.current) break;
 
       // 4. Wait for quiz questions or instructions page to load on quizTabId
@@ -220,18 +221,17 @@ export async function runBatchQuizAutomation({
         text: `⏳ Waiting for questions to load for Quiz ${quizIndexNum}: ${currentQuiz.subject}...`,
       });
 
-      const readyRes = await waitForQuizQuestionsToLoad(quizTabId, 20000);
+      const readyRes = await waitForQuizQuestionsToLoad(quizTabId, 30000, () => isBatchRunningRef.current);
+      if (!isBatchRunningRef.current) break;
       if (!readyRes.ready) {
         console.warn(`Questions did not load for quiz: ${currentQuiz.title}`);
         failedQuizzes.push({ quiz: currentQuiz, error: 'Questions did not load within timeout.' });
-        if (openedInNewTab) {
-          try { await chrome.tabs.remove(quizTabId); } catch {}
-          try { await chrome.tabs.update(tabId, { active: true }); } catch {}
-        } else {
-          await navigateBackToCatalog(tabId, catalogUrl);
-          await waitForCatalogToLoad(tabId, 10000);
-        }
+        consecutiveFailures++;
         completedCount++;
+        if (!openedInNewTab || consecutiveFailures >= 3) {
+          throw new Error('Batch stopped after quiz loading failures. The unfinished quiz has been left open.');
+        }
+        await chrome.tabs.update(tabId, { active: true });
         continue;
       }
 
@@ -287,7 +287,7 @@ export async function runBatchQuizAutomation({
                 singleQuizResult.error = res.error;
                 singleQuizResult.errorStatus = res.errorStatus;
               } else {
-                singleQuizResult.success = true;
+                singleQuizResult.error = 'Quiz automation did not confirm completion.';
               }
               resolve();
             },
@@ -301,10 +301,6 @@ export async function runBatchQuizAutomation({
       }
 
       if (!isBatchRunningRef.current) {
-        if (openedInNewTab) {
-          try { await chrome.tabs.remove(quizTabId); } catch {}
-          try { await chrome.tabs.update(tabId, { active: true }); } catch {}
-        }
         onBatchStatus?.({
           type: 'info',
           text: '⏹️ Batch Auto-Solve paused by user.',
@@ -325,6 +321,7 @@ export async function runBatchQuizAutomation({
       completedCount++;
 
       if (singleQuizResult.success) {
+        consecutiveFailures = 0;
         successfulQuizzes.push(currentQuiz);
         onQuizCompleted?.({
           quiz: currentQuiz,
@@ -337,6 +334,7 @@ export async function runBatchQuizAutomation({
           text: `🎉 Solved & Submitted Quiz ${quizIndexNum} of ${totalToSolve}: ${currentQuiz.subject}! Returning to catalog...`,
         });
       } else {
+        consecutiveFailures++;
         failedQuizzes.push({ quiz: currentQuiz, error: singleQuizResult.error });
         onQuizCompleted?.({
           quiz: currentQuiz,
@@ -351,7 +349,11 @@ export async function runBatchQuizAutomation({
         });
       }
 
-      // 6. Return to catalog: Close new tab or navigate back
+      if (!singleQuizResult.success && (!openedInNewTab || consecutiveFailures >= 3)) {
+        throw new Error(singleQuizResult.error || 'Batch stopped after repeated quiz failures.');
+      }
+
+      // 6. Return to the catalog, preserving unfinished quizzes for review.
       await new Promise((r) => setTimeout(r, 1200));
       if (!isBatchRunningRef.current) break;
 
@@ -361,9 +363,9 @@ export async function runBatchQuizAutomation({
       });
 
       if (openedInNewTab) {
-        try {
-          await chrome.tabs.remove(quizTabId);
-        } catch {}
+        if (singleQuizResult.success) {
+          try { await chrome.tabs.remove(quizTabId); } catch {}
+        }
         try {
           await chrome.tabs.update(tabId, { active: true });
         } catch {}

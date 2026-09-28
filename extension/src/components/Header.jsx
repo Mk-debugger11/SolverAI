@@ -1,4 +1,5 @@
 import React from 'react';
+import { IconZap, IconGlobe, IconExternalLink, IconSettings } from './Icons';
 
 /**
  * Header component: Displays application title, backend connectivity status,
@@ -15,8 +16,10 @@ export default function Header({
     <header className="header">
       <div className="header-left">
         <div className="logo-row">
-          <span className="logo-icon">⚡</span>
-          <h1>DOM Fetcher</h1>
+          <span className="logo-icon">
+            <IconZap size={15} />
+          </span>
+          <h1>Solver.Ai</h1>
           {turboMode && <span className="turbo-badge">TURBO</span>}
         </div>
         <p className="subtitle">Quizzes & assignment workspace</p>
@@ -44,7 +47,9 @@ export default function Header({
             className="tab-domain-chip"
             title={`${activeTab.title}\n${activeTab.url}`}
           >
-            <span className="domain-icon">🌐</span>
+            <span className="domain-icon">
+              <IconGlobe size={11} />
+            </span>
             <span className="domain-text">
               {(() => {
                 try {
@@ -74,9 +79,8 @@ export default function Header({
             }
           }}
           title="Open Dashboard in a persistent floating window (never auto-closes on tab switch)"
-          style={{ fontSize: '15px' }}
         >
-          ⧉
+          <IconExternalLink size={13} />
         </button>
 
         {/* Settings Toggle */}
@@ -85,7 +89,7 @@ export default function Header({
           onClick={onToggleSettings}
           title="Open LLM & Solver Settings"
         >
-          ⚙️
+          <IconSettings size={13} />
         </button>
       </div>
     </header>

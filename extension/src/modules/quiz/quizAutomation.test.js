@@ -341,3 +341,23 @@ test('a revision page with several questions directs users to individual solves 
   assert.equal(app.completion.success, false);
   assert.match(app.completion.error, /Inspect DOM.*individual question card/);
 });
+
+for (const answerType of ['mcq', 'numeric']) {
+  test(`a changed diagram prevents a stale ${answerType} answer from being applied`, async () => {
+    const initial = answerType === 'numeric' ? numericQuestion(1) : question(1);
+    const images = ['https://example.test/first.png', 'https://example.test/second.png'];
+    const app = quiz({ questions: [{ ...initial, images }],
+      solve: () => ({ answer: answerType === 'numeric' ? '42' : 'B' }),
+      extract({ extractionCount, questions }) {
+        if (extractionCount !== 2) return null;
+        return { questions: [{ ...questions[0], images: [...images].reverse() }] };
+      },
+    });
+    await app.run();
+    assert.equal(app.calls.solves.length, 1);
+    assert.equal(app.calls.clicks.length, 0);
+    assert.equal(app.calls.fills.length, 0);
+    assert.equal(app.calls.submissions, 0);
+    assert.equal(app.completion.success, false);
+  });
+}

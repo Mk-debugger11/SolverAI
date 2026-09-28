@@ -22,6 +22,7 @@ function questionIdentity(question) {
     text: normalizeText(payload.q),
     options: Object.entries(payload.o || {}).sort(([a], [b]) => a.localeCompare(b))
       .map(([key, value]) => [key, normalizeText(value)]),
+    images: payload.images || [],
     // Numeric controls have no choices to anchor the answer to. Match the
     // control's stable context; its editable value is checked separately.
     input: answerType === 'numeric'

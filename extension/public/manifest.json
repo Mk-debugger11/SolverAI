@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "DOM Fetcher (MERN)",
+  "name": "Solver.Ai",
   "version": "1.0.2",
-  "description": "Captures the DOM of the active webpage and connects with your MERN stack.",
+  "description": "Quiz and assignment automation with DOM extraction, powered by Groq LLMs.",
   "permissions": [
     "activeTab",
     "scripting",
