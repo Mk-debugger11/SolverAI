@@ -1,4 +1,6 @@
 .assignment-workbench {
+  flex: 1;
+  min-height: 0;
   --assignment-bg: #101b22;
   --assignment-panel: #14232c;
   --assignment-line: #2a3c46;
@@ -10,7 +12,8 @@
   border: 1px solid var(--assignment-line);
   border-radius: 12px;
   font-family: 'Avenir Next', 'Trebuchet MS', sans-serif;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   font-size: 12px;
   line-height: 1.5;
 }

@@ -203,8 +203,48 @@ function browserFixture(cards) {
       return [{ result: run(...args) }];
     } },
   };
-  return { tabs, create, removed, listeners };
+  return { tabs, create, removed, listeners, contexts };
 }
+
+test('batch scan scrolls the catalog to load more assignment rows', async () => {
+  const cards = [card('first'), element('span', {}, [], '0/2 Solved')];
+  const fixture = browserFixture(cards);
+  const context = fixture.contexts.get(1);
+  const scroller = context.document.body;
+  context.document.scrollingElement = scroller;
+  scroller.clientHeight = 400;
+  scroller.scrollHeight = 1000;
+  let position = 0;
+  Object.defineProperty(scroller, 'scrollTop', {
+    get: () => position,
+    set: (value) => {
+      position = value;
+      if (position >= 600 && !cards.some((node) => node.querySelector?.('[data-testid="assignment-title"]')?.textContent === 'second')) {
+        const added = card('second');
+        added.parentElement = scroller;
+        cards.unshift(added);
+        scroller.scrollHeight = 1400;
+      }
+    },
+  });
+  const result = await assignmentCatalog.scan(1, { expand: true, timeoutMs: 3000 });
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.items.map((item) => item.title), ['first', 'second']);
+  assert.ok(position >= 600);
+});
+
+test('batch scan reports a partial catalog when the displayed total never loads', async () => {
+  const fixture = browserFixture([card('first'), element('span', {}, [], '0/3 Solved')]);
+  const context = fixture.contexts.get(1);
+  const scroller = context.document.body;
+  context.document.scrollingElement = scroller;
+  scroller.clientHeight = 400;
+  scroller.scrollHeight = 600;
+  scroller.scrollTop = 0;
+  const result = await assignmentCatalog.scan(1, { expand: true, timeoutMs: 3000 });
+  assert.equal(result.complete, false);
+  assert.match(result.reason, /Only 1 of 3 assignments loaded/);
+});
 
 test('direct links only own their created tab and refuse to close navigated tabs', async () => {
   const f = browserFixture([card('one')]);

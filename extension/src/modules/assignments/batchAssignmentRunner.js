@@ -7,7 +7,8 @@ const terminal = new Set(['completed', 'stopped']);
 
 /** Owns one sequential catalog pass. Credentials exist only in the active call. */
 export function createBatchAssignmentRunner({ storage, catalog = assignmentCatalog, singleRunner,
-  notify = () => {}, isOtherBusy = () => false, now = Date.now, makeId = () => crypto.randomUUID() }) {
+  notify = () => {}, isOtherBusy = () => false, now = Date.now, makeId = () => crypto.randomUUID(),
+  getTab = (tabId) => chrome.tabs.get(tabId) }) {
   let batch = null;
   let loaded = false;
   let loading;
@@ -66,7 +67,9 @@ export function createBatchAssignmentRunner({ storage, catalog = assignmentCatal
     return scan;
   }
   async function scanCatalog(refresh = false) {
-    const scan = validateCatalog(await catalog.scan(batch.catalogTabId, { refresh, expand: true, signal: controller.signal }));
+    const snapshot = await catalog.scan(batch.catalogTabId, { refresh, expand: true, signal: controller.signal });
+    if (!batch.catalogUrl && snapshot?.isCatalog && snapshot.currentUrl) batch.catalogUrl = snapshot.currentUrl;
+    const scan = validateCatalog(snapshot);
     checkStopped();
     batch.catalogUrl = scan.currentUrl;
     batch.scope = scan.scope || 'Loaded assignment cards and observed pagination';
@@ -149,6 +152,27 @@ export function createBatchAssignmentRunner({ storage, catalog = assignmentCatal
     batch.completedKeys = batch.results.filter((item) => item.status === 'accepted').map((item) => item.key);
     await persist();
     await closeOwned();
+  }
+  async function bindReplacementCatalog(tabId) {
+    if (!Number.isInteger(tabId) || tabId === batch.catalogTabId) return;
+    try {
+      await getTab(batch.catalogTabId);
+      throw new Error('The saved batch catalog tab is still open. Return to it to reconcile this batch.');
+    } catch (error) {
+      if (!/No tab with id|closed|not found/i.test(error.message || '')) throw error;
+    }
+    const scan = await catalog.scan(tabId, { expand: true, signal: controller.signal });
+    if (!scan?.isCatalog || !scan.complete) throw new Error(scan?.reason || 'Open the course All Assignments catalog before reconciling.');
+    if (batch.catalogUrl) {
+      if (new URL(scan.currentUrl).pathname !== new URL(batch.catalogUrl).pathname) {
+        throw new Error('Open the All Assignments catalog for the same course as the saved batch.');
+      }
+    } else if (batch.pendingEffect || batch.results.length || batch.ownedTabs.length) {
+      throw new Error('The saved batch lacks a verified course identity. Its uncertain work needs manual review.');
+    }
+    batch.catalogTabId = tabId;
+    batch.catalogUrl = scan.currentUrl;
+    await persist();
   }
   async function run(payload) {
     while (true) {
@@ -290,13 +314,14 @@ export function createBatchAssignmentRunner({ storage, catalog = assignmentCatal
       await persist();
       return view();
     },
-    async recover() {
+    async recover(payload = {}) {
       if (busy || isOtherBusy() || singleRunner.busy) throw new Error('Another quiz or assignment job is active.');
       busy = true;
       controller = new AbortController();
       try {
         await load();
         if (!batch) return view();
+        await bindReplacementCatalog(payload.tabId);
         await reconcile();
         await phase('stopped', { reason: 'Batch reconciled. Start continues the remaining assignment cards.' });
       } catch (error) {
@@ -320,7 +345,7 @@ export function createBatchAssignmentRunner({ storage, catalog = assignmentCatal
         await load();
         if (!Number.isInteger(payload.tabId)) throw new Error('A catalog tab is required.');
         if (batch?.recovery?.required || batch?.pendingEffect) {
-          if (payload.tabId !== batch.catalogTabId) throw new Error('Return to the saved batch catalog to reconcile it.');
+          await bindReplacementCatalog(payload.tabId);
           await reconcile();
         } else if (batch && payload.tabId === batch.catalogTabId) {
           // Keep acknowledged but ungraded submissions across subsequent starts.

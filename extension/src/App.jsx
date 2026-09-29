@@ -24,6 +24,7 @@ import AssignmentDashboard from './modules/assignments/AssignmentDashboard';
 import { acquireQuizActionLease } from './modules/assignments/quizActionLease';
 import { getAssignmentWorkerState, sendAssignmentCommand } from './modules/assignments/assignmentMessages';
 import { assertAssignmentPageAction } from './modules/assignments/assignmentPageScope';
+import { openCourseAssignmentCatalog } from './modules/assignments/assignmentBatchTab';
 
 // LLM Module & Services
 import { formatLlmPayload, solveMcq, fetchLlmConfig, normalizeNumericAnswer } from './modules/llm/llmService';
@@ -830,7 +831,10 @@ export default function App() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!Number.isInteger(tab?.id)) throw new Error('Open a Newton assignment tab before continuing.');
     setActiveTab(tab);
-    assertAssignmentPageAction(tab.url, action);
+    const scope = assertAssignmentPageAction(tab.url, action);
+    if (['start', 'recover'].includes(action) && scope.kind === 'course') {
+      return openCourseAssignmentCatalog(tab.url, tab.id, assignmentBatch?.catalogTabId);
+    }
     return tab.id;
   };
 
@@ -859,7 +863,7 @@ export default function App() {
       throw new Error('Load the built extension in Chrome to use assignment actions.');
     }
     try {
-      const tabId = action === 'start' ? await getAssignmentActionTabId(action) : assignmentBatch?.catalogTabId;
+      const tabId = ['start', 'recover'].includes(action) ? await getAssignmentActionTabId(action) : assignmentBatch?.catalogTabId;
       setStatusMessage(null);
       const response = await sendAssignmentCommand({
         scope: 'batch', action, onState: acceptAssignmentState,
@@ -918,7 +922,7 @@ export default function App() {
         >
           <IconCrosshair size={13} style={{ marginRight: '6px' }} />Quizzes
         </button>
-        <button className={`tab-btn ${view === 'assignments' ? 'active' : ''}`} onClick={() => setView('assignments')}>
+        <button className={`tab-btn ${view === 'assignments' ? 'active' : ''}`} onClick={() => { setView('assignments'); setStatusMessage(null); }}>
           Assignments
         </button>
         <button

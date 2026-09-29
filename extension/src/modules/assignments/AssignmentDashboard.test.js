@@ -97,7 +97,7 @@ test('a workspace offers single solve before inspection and explains where batch
   assert.match(html, /Solve unfinished assignments/);
   assert.doesNotMatch(html, /<button[^>]*disabled[^>]*>Solve this assignment/);
   assert.match(html, /<button[^>]*disabled[^>]*>Solve unfinished assignments/);
-  assert.match(html, /Open the course All Assignments catalog to start a batch/);
+  assert.match(html, /Open a course overview or its All Assignments catalog to start a batch/);
   assert.match(html, /Shared assignment settings/);
   assert.match(html, /value="test-model"/);
   assert.match(html, /<details class="assignment-manual"><summary>Manual controls/);
@@ -158,8 +158,11 @@ test('batch recovery explains uncertainty without representing it as acceptance'
   assert.match(html, /Unknown <b>1<\/b>/);
   assert.doesNotMatch(html, /Accepted <b>/);
   assert.match(html, /<button[^>]*disabled[^>]*>Solve unfinished assignments/);
-  assert.doesNotMatch(html, /<button[^>]*disabled[^>]*>Reconcile batch/);
-  assert.match(html, /It does not repeat submission/);
+  assert.match(html, /<button[^>]*disabled[^>]*>Reconcile batch/);
+  assert.match(html, /without repeating submission/);
+  const catalog = render({ activeTabUrl: 'https://my.newtonschool.co/course/course-1/all_assignments',
+    batch: { phase: 'needs_reconciliation', recovery: { required: true } }, onBatchAction() {} });
+  assert.doesNotMatch(catalog, /<button[^>]*disabled[^>]*>Reconcile batch/);
 });
 
 test('single solve remains stoppable between individual execution phases', () => {
@@ -202,6 +205,15 @@ test('the catalog promotes batch solving and does not offer the single assignmen
   assert.doesNotMatch(html, /<button[^>]*>Solve this assignment/);
   assert.doesNotMatch(html, /<button class="[^"]*assignment-inspect/);
   assert.match(html, /Open a coding assignment or notebook from the catalog/);
+});
+
+test('the course overview can start or recover its assignment batch', () => {
+  const batch = { phase: 'needs_reconciliation', recovery: { required: true }, items: [], results: [] };
+  const html = render({ activeTabUrl: 'https://my.newtonschool.co/course/course-1/details', batch, onBatchAction() {} });
+  assert.match(html, /Course overview/);
+  assert.doesNotMatch(html, /<button[^>]*>Solve this assignment/);
+  assert.match(html, /<button[^>]*disabled[^>]*>Solve unfinished assignments/);
+  assert.match(html, /<button[^>]*>Reconcile batch/);
 });
 
 test('unknown and other pages offer navigation guidance instead of enabled assignment actions', () => {

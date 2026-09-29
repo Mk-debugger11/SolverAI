@@ -197,6 +197,46 @@ test('interrupted open reconciles without requiring submission and clears its pr
   assert.equal(f.events.includes('solve:one'), false);
 });
 
+test('a closed catalog tab can be replaced by the same course during recovery', async () => {
+  const f = fixture([card('one')]);
+  f.dependencies.getTab = async () => { throw new Error('No tab with id: 1'); };
+  f.dependencies.catalog.scan = async (tabId) => ({ isCatalog: true, complete: tabId === 2,
+    currentUrl: 'https://my.newtonschool.co/course/course-1/all_assignments',
+    items: tabId === 2 ? [card('one')] : [], reason: tabId === 2 ? null : 'Cards are still loading.' });
+  const runner = createBatchAssignmentRunner(f.dependencies);
+  await assert.rejects(runner.start({ tabId: 1 }), /Cards are still loading/);
+  const recovered = await runner.recover({ tabId: 2 });
+  assert.equal(recovered.batch.catalogTabId, 2);
+  assert.equal(recovered.batch.phase, 'stopped');
+  assert.equal(recovered.batch.recovery.required, false);
+  assert.deepEqual(f.events, []);
+});
+
+test('a replacement catalog must belong to the saved course', async () => {
+  const f = fixture([card('one')]);
+  f.dependencies.getTab = async () => { throw new Error('No tab with id: 1'); };
+  f.dependencies.catalog.scan = async (tabId) => ({ isCatalog: true, complete: tabId === 2,
+    currentUrl: `https://my.newtonschool.co/course/${tabId === 2 ? 'other' : 'course-1'}/all_assignments`,
+    items: tabId === 2 ? [card('one')] : [], reason: tabId === 2 ? null : 'Cards are still loading.' });
+  const runner = createBatchAssignmentRunner(f.dependencies);
+  await assert.rejects(runner.start({ tabId: 1 }), /Cards are still loading/);
+  await assert.rejects(runner.recover({ tabId: 2 }), /same course/);
+  assert.equal((await runner.getState()).batch.catalogTabId, 1);
+});
+
+test('replacing a closed catalog never replays an uncertain submission', async () => {
+  const f = fixture([card('one')]);
+  f.dependencies.getTab = async () => { throw new Error('No tab with id: 1'); };
+  let requests = 0;
+  f.dependencies.singleRunner.action = async () => { requests++; return { job: { recovery: { required: true }, submission: { status: 'unknown' } } }; };
+  const runner = createBatchAssignmentRunner(f.dependencies);
+  await assert.rejects(runner.start({ tabId: 1 }), /acknowledged/);
+  assert.equal(requests, 1);
+  await assert.rejects(runner.recover({ tabId: 2 }), /no verified completion/);
+  assert.equal(requests, 1);
+  assert.equal((await runner.getState()).batch.recovery.required, true);
+});
+
 test('expiration does not erase an uncertain submission checkpoint', async () => {
   const f = fixture();
   f.dependencies.singleRunner.action = async () => ({ job: {} });

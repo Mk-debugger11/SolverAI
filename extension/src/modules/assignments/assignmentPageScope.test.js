@@ -9,9 +9,18 @@ test('catalog URLs allow batch actions and reject the single assignment detector
     const url = portal + path;
     assert.equal(getAssignmentPageScope(url).kind, 'catalog');
     assert.doesNotThrow(() => assertAssignmentPageAction(url, 'start'));
+    assert.doesNotThrow(() => assertAssignmentPageAction(url, 'recover'));
     assert.throws(() => assertAssignmentPageAction(url, 'inspect'), /assignment catalog/);
     assert.throws(() => assertAssignmentPageAction(url, 'solve'), /Solve unfinished assignments/);
   }
+});
+
+test('course overview can launch and recover a batch without enabling a single solve', () => {
+  const url = `${portal}/course/course-1/details`;
+  assert.equal(getAssignmentPageScope(url).kind, 'course');
+  assert.doesNotThrow(() => assertAssignmentPageAction(url, 'start'));
+  assert.doesNotThrow(() => assertAssignmentPageAction(url, 'recover'));
+  assert.throws(() => assertAssignmentPageAction(url, 'solve'));
 });
 
 test('verified code and notebook workspaces allow single actions before inspection', () => {
@@ -21,6 +30,7 @@ test('verified code and notebook workspaces allow single actions before inspecti
     assert.doesNotThrow(() => assertAssignmentPageAction(url, 'inspect'));
     assert.doesNotThrow(() => assertAssignmentPageAction(url, 'solve'));
     assert.throws(() => assertAssignmentPageAction(url, 'start'), /All Assignments catalog/);
+    assert.throws(() => assertAssignmentPageAction(url, 'recover'), /All Assignments catalog/);
   }
 });
 

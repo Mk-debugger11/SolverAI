@@ -178,6 +178,24 @@ export function assignmentCatalogPage(operation = 'scan', expected = null) {
     (/^(?:next|next page)$/i.test(clean(element.innerText || element.textContent)) ||
       /^(?:next|next page)$/i.test(element.getAttribute('aria-label') || '') || element.getAttribute('data-testid') === 'pagination-next'));
   const pageFingerprint = JSON.stringify(entries.map(({ item }) => item.key));
+  if (operation === 'scroll-more') {
+    if (expected?.catalogUrl !== currentUrl || expected?.pageFingerprint !== pageFingerprint) {
+      return { success: false, reason: 'The assignment catalog changed before scrolling.' };
+    }
+    const lastCard = cards.at(-1);
+    let scroller = lastCard?.parentElement;
+    while (scroller && scroller !== document.body) {
+      const style = getComputedStyle(scroller);
+      if (/(?:auto|scroll)/.test(style.overflowY || '') && scroller.scrollHeight > scroller.clientHeight + 2) break;
+      scroller = scroller.parentElement;
+    }
+    if (!scroller || scroller === document.body) scroller = document.scrollingElement || document.documentElement || document.body;
+    const before = scroller.scrollTop || 0;
+    const end = Math.max(0, (scroller.scrollHeight || 0) - (scroller.clientHeight || 0));
+    scroller.scrollTop = Math.min(end, before + Math.max(300, Math.floor((scroller.clientHeight || 0) * 0.8)));
+    return { success: true, moved: (scroller.scrollTop || 0) > before, atEnd: (scroller.scrollTop || 0) >= end - 2,
+      scrollHeight: scroller.scrollHeight || 0 };
+  }
   if (operation === 'load-more') {
     if (loadMore.length !== 1 || expected?.catalogUrl !== currentUrl) return { success: false, reason: 'A unique Load more control is unavailable.' };
     loadMore[0].click();
@@ -208,9 +226,11 @@ export function assignmentCatalogPage(operation = 'scan', expected = null) {
   const emptyConfirmed = Array.from(document.querySelectorAll('[data-testid="assignments-empty"], [role="status"]'))
     .some((element) => visible(element) && /^(?:no assignments(?: found| available)?|all assignments completed)$/i.test(clean(element.innerText || element.textContent)));
   const complete = entries.length <= 500 && knownStatusCount === coveredStatusCount && (entries.length > 0 || emptyConfirmed);
+  const count = clean(document.body?.innerText || '').match(/\b\d+\s*\/\s*(\d+)\s+Solved\b/i);
   return { isCatalog, currentUrl, items: entries.map(({ item }) => item), complete, pageFingerprint,
     hasLoadMore: loadMore.length === 1, hasNextPage: nextPages.length > 0,
-    scope: 'Loaded assignment cards, with observed Load more and Next page controls followed automatically.',
+    expectedTotal: count ? Number(count[1]) : null,
+    scope: 'Loaded assignment cards after scrolling, Load more, and Next page controls.',
     reason: complete ? null : 'Some assignment cards could not be identified completely. Load the catalog and inspect its titles and status icons.' };
 }
 
@@ -245,20 +265,39 @@ async function scan(tabId, { refresh = false, expand = false, signal, timeoutMs 
   let result;
   let expansions = 0;
   let previousCount = -1;
+  const collected = new Map();
+  let stableAtEnd = 0;
+  let lastSignature = '';
   do {
     stopped(signal);
     result = await page(tabId, 'scan', null);
     if (!result?.isCatalog) return result;
-    if (result.complete && (!expand || !result.hasLoadMore)) return result;
+    if (!expand) return result;
+    for (const item of result.items || []) collected.set(item.key, item);
+    if (collected.size > 500) return { ...result, complete: false, reason: 'The catalog exceeds the 500-assignment batch limit.' };
     if (result.complete && expand && result.hasLoadMore && result.items.length > previousCount && expansions < 20) {
       previousCount = result.items.length;
       const clicked = await page(tabId, 'load-more', { catalogUrl: result.currentUrl });
       if (!clicked?.success) return { ...result, complete: false, reason: clicked?.reason || 'Loading more assignments failed.' };
       expansions++;
+      stableAtEnd = 0;
+    } else if (result.complete && !result.hasLoadMore) {
+      const scrolled = await page(tabId, 'scroll-more', { catalogUrl: result.currentUrl, pageFingerprint: result.pageFingerprint });
+      if (!scrolled?.success) return { ...result, complete: false, reason: scrolled?.reason || 'Scrolling the catalog failed.' };
+      const signature = `${collected.size}:${result.pageFingerprint}:${scrolled.scrollHeight}`;
+      stableAtEnd = scrolled.atEnd && signature === lastSignature ? stableAtEnd + 1 : 0;
+      lastSignature = signature;
+      if (scrolled.scrollHeight === 0 || stableAtEnd >= 8) {
+        const items = [...collected.values()];
+        const missing = !result.hasNextPage && result.expectedTotal && items.length < result.expectedTotal;
+        return { ...result, items, complete: !missing,
+          reason: missing ? `Only ${items.length} of ${result.expectedTotal} assignments loaded after scrolling. Check the catalog before starting a batch.` : null };
+      }
     }
     await pause(150);
   } while (Date.now() < deadline);
-  return { ...result, complete: false, reason: result?.reason || 'The catalog did not finish loading all requested cards within the time limit.' };
+  return { ...result, items: [...collected.values()], complete: false,
+    reason: result?.reason || 'The catalog did not finish loading all requested cards within the time limit.' };
 }
 
 async function nextPage(tabId, { signal, expectedUrl, timeoutMs = 15000 } = {}) {

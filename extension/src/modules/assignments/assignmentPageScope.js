@@ -17,6 +17,10 @@ export function getAssignmentPageScope(value) {
     kind: 'catalog', label: 'All Assignments catalog',
     message: 'Solve the unfinished assignments in this course. Open an individual assignment to inspect its sources.',
   };
+  if (/^\/course\/[^/]+\/details\/?$/.test(url.pathname)) return {
+    kind: 'course', label: 'Course overview',
+    message: 'Start a batch from this course. The assignment catalog opens in another tab.',
+  };
   if (/^\/playground\/(code|newton-box)\/[^/]+\/?$/.test(url.pathname)) return {
     kind: 'workspace', label: url.pathname.startsWith('/playground/newton-box/') ? 'Notebook assignment' : 'Coding assignment',
     message: 'Solve or inspect the assignment open in this tab.',
@@ -33,8 +37,8 @@ export function getAssignmentPageScope(value) {
 
 export function assertAssignmentPageAction(url, action) {
   const scope = getAssignmentPageScope(url);
-  if (action === 'start' && scope.kind !== 'catalog') {
-    throw new Error('Open the course All Assignments catalog before starting an assignment batch.');
+  if (['start', 'recover'].includes(action) && !['catalog', 'course'].includes(scope.kind)) {
+    throw new Error('Open a Newton course overview or its All Assignments catalog before starting an assignment batch.');
   }
   if (['inspect', 'solve'].includes(action) && scope.kind !== 'workspace') {
     throw new Error(scope.kind === 'catalog'

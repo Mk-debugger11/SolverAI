@@ -74,7 +74,7 @@ function BatchProgress({ batch, active, stopping, canRecover, onStop, onRecover 
     <div className="assignment-batch-count"><span>{total ? `${finished} of ${total} assignments recorded` : emptyProgress}</span>{current && <strong>{current.title || 'Current assignment'}</strong>}</div>
     {total > 0 && <progress aria-label="Assignments with recorded outcomes" max={total} value={finished} />}
     {(readable(batch.error) || readable(batch.reason)) && <p className="assignment-note">{readable(batch.error) || readable(batch.reason)}</p>}
-    {(batch.recovery?.required || batch.phase === 'needs_reconciliation') && <div className="assignment-notice is-warning"><p>{readable(batch.recovery) || 'Inspect the affected workspace and its portal result before starting another batch. An uncertain submission will not be repeated automatically.'}</p><button className="assignment-button" disabled={!canRecover} onClick={onRecover}>Reconcile batch</button><p>Reads the catalog and retained result. It does not repeat submission.</p></div>}
+    {(batch.recovery?.required || batch.phase === 'needs_reconciliation') && <div className="assignment-notice is-warning"><p>{readable(batch.recovery) || 'Inspect the affected workspace and its portal result before starting another batch. An uncertain submission will not be repeated automatically.'}</p><button className="assignment-button" disabled={!canRecover} onClick={onRecover}>Reconcile batch</button><p>Reconcile from this course overview or its All Assignments catalog. The catalog and retained result are checked without repeating submission.</p></div>}
     {rows.length > 0 && <>
       <div className="assignment-result-counts">{Object.entries(counts).map(([status, count]) => <span key={status} className={`assignment-outcome is-${Object.hasOwn(RESULT_LABELS, status) ? status : 'unknown'}`}>{RESULT_LABELS[status] || 'Unknown'} <b>{count}</b></span>)}</div>
       <ol className="assignment-batch-results">{rows.map((result, index) => <li key={`${result.key || index}:${index}`}><div><strong>{result.title || `Assignment ${index + 1}`}</strong><span className={`assignment-outcome is-${Object.hasOwn(RESULT_LABELS, result.status) ? result.status : 'unknown'}`}>{RESULT_LABELS[result.status] || 'Unknown'}</span></div>{readable(result) && <p>{readable(result)}</p>}</li>)}</ol>
@@ -90,6 +90,8 @@ function BatchProgress({ batch, active, stopping, canRecover, onStop, onRecover 
 export default function AssignmentDashboard({ job = null, batch = null, activeTabUrl, busy = false, operationBusy = false, onAction, onBatchAction, settings = {}, onSettingsChange, onSwitchTab }) {
   const pageScope = getAssignmentPageScope(activeTabUrl);
   const onCatalog = pageScope.kind === 'catalog';
+  const onCourse = pageScope.kind === 'course';
+  const canBatch = onCatalog || onCourse;
   const onWorkspace = pageScope.kind === 'workspace';
   const snapshot = job?.snapshot;
   const targets = Array.isArray(snapshot?.targets) ? snapshot.targets : [];
@@ -214,7 +216,7 @@ export default function AssignmentDashboard({ job = null, batch = null, activeTa
     </header>
 
     <section className="assignment-launch" aria-label="Solve assignments">
-      <div className="assignment-launch-heading"><span className="assignment-step">{onCatalog ? 'COURSE' : 'AUTO'}</span><h3>{pageScope.label}</h3></div>
+      <div className="assignment-launch-heading"><span className="assignment-step">{canBatch ? 'COURSE' : 'AUTO'}</span><h3>{pageScope.label}</h3></div>
       <p className="assignment-scope-message">{pageScope.message}</p>
       {pageScope.kind === 'quiz' && typeof onSwitchTab === 'function' && (
         <button
@@ -226,12 +228,12 @@ export default function AssignmentDashboard({ job = null, batch = null, activeTa
           Go to Quizzes Tab →
         </button>
       )}
-      {!onCatalog && <>
+      {!canBatch && <>
         <button className="assignment-button assignment-button-primary assignment-wide assignment-solve" disabled={!onWorkspace || locked || recoveryRequired || typeof onAction !== 'function'} onClick={() => act('solve', { ...settings })}>Solve this assignment<Icon name="arrow" /></button>
         {onWorkspace && <p className="assignment-note">Chooses supported sources and notebook cells, generates changes, runs checks, and submits when the portal supports it.</p>}
       </>}
-      <button className={`assignment-button assignment-wide assignment-solve-batch ${onCatalog ? 'assignment-button-primary is-catalog-primary' : ''}`} disabled={!onCatalog || locked || recoveryRequired || batchRecoveryRequired || typeof onBatchAction !== 'function'} onClick={() => act('start', { ...settings }, true)}>Solve unfinished assignments<Icon name="arrow" /></button>
-      <p className="assignment-note">{onCatalog ? 'Works through unfinished assignments within request and repair limits; unsupported work is reported.' : 'Open the course All Assignments catalog to start a batch.'}</p>
+      <button className={`assignment-button assignment-wide assignment-solve-batch ${canBatch ? 'assignment-button-primary is-catalog-primary' : ''}`} disabled={!canBatch || locked || recoveryRequired || batchRecoveryRequired || typeof onBatchAction !== 'function'} onClick={() => act('start', { ...settings }, true)}>Solve unfinished assignments<Icon name="arrow" /></button>
+      <p className="assignment-note">{canBatch ? 'Works through unfinished assignments within request and repair limits; unsupported work is reported.' : 'Open a course overview or its All Assignments catalog to start a batch.'}</p>
       <details className="assignment-settings"><summary>Shared assignment settings <span>{settings.model || 'Server default'}</span></summary>
         <div className="assignment-settings-fields">
           <label>Model<input type="text" value={settings.model || ''} placeholder="Use server default" disabled={locked} onChange={(event) => onSettingsChange?.({ ...settings, model: event.target.value })} spellCheck={false} /></label>
@@ -241,7 +243,7 @@ export default function AssignmentDashboard({ job = null, batch = null, activeTa
       </details>
     </section>
 
-    {batch && <BatchProgress batch={batch} active={batchActive} stopping={batch.phase === 'stopping' || pendingAction === 'batch:stop'} canRecover={!locked && typeof onBatchAction === 'function'} onStop={() => act('stop', {}, true)} onRecover={() => act('recover', {}, true)} />}
+    {batch && <BatchProgress batch={batch} active={batchActive} stopping={batch.phase === 'stopping' || pendingAction === 'batch:stop'} canRecover={canBatch && !locked && typeof onBatchAction === 'function'} onStop={() => act('stop', {}, true)} onRecover={() => act('recover', {}, true)} />}
 
     {job && <div className={`assignment-status ${attention || job.error ? 'has-attention' : ''}`} role="status" aria-live="polite">
       <span className={`assignment-status-dot ${active || operationBusy ? 'is-active' : ''}`} />
