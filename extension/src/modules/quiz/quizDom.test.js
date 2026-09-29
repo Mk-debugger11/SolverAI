@@ -509,3 +509,59 @@ test('standalone MathML is retained as readable text without modifying the origi
   assert.match(data.questions[0].questionText, /x squared/);
   assert.equal(fixture.heading.querySelector('math'), math);
 });
+
+test('detects Newton School test overview page and extracts syllabus and question count', async () => {
+  const body = new ElementFixture('body');
+  const card = new ElementFixture('div', { class: 'overview-card' });
+  body.append(card);
+  const playlistTitle = new ElementFixture('div', {}, 'Playlist Title');
+  const playlistName = new ElementFixture('h2', {}, 'Time Series Modelling - Revision');
+  const syllabus = new ElementFixture('div', {}, 'TEST SYLLABUS\nTime Series Data, Trends, Seasonality');
+  const questionsInfo = new ElementFixture('div', {}, 'NUMBER OF QUESTIONS\n8 Questions');
+  const xpInfo = new ElementFixture('div', {}, 'TOTAL XP 18');
+  const startBtn = new ElementFixture('button', { class: 'sc-btn' }, 'Start Test');
+  card.append(playlistTitle, playlistName, syllabus, questionsInfo, xpInfo, startBtn);
+
+  const document = {
+    body,
+    querySelectorAll: (sel) => body.querySelectorAll(sel),
+    querySelector: (sel) => body.querySelector(sel),
+    evaluate: () => ({ singleNodeValue: null }),
+  };
+
+  const p = page(document);
+  const detectResult = await p.context.detectQuizStartPage(1);
+  assert.equal(detectResult.isStartPage, true);
+  assert.equal(detectResult.buttonText, 'Start Test');
+  assert.equal(detectResult.questionCount, 8);
+  assert.equal(detectResult.totalXp, 18);
+});
+
+test('handleStartOrInstructionsPage finds and clicks the Start Test button', async () => {
+  const body = new ElementFixture('body');
+  const card = new ElementFixture('div', { class: 'overview-card' });
+  body.append(card);
+  let clicked = false;
+  const startBtn = new ElementFixture('button', { class: 'sc-btn' }, 'Start Test');
+  startBtn.click = () => { clicked = true; };
+  startBtn.dispatchEvent = () => { clicked = true; };
+  card.append(
+    new ElementFixture('div', {}, 'TEST SYLLABUS\nTime Series Modelling'),
+    new ElementFixture('div', {}, '8 Questions'),
+    startBtn
+  );
+
+  const document = {
+    body,
+    querySelectorAll: (sel) => body.querySelectorAll(sel),
+    querySelector: (sel) => body.querySelector(sel),
+    evaluate: () => ({ singleNodeValue: null }),
+  };
+
+  const p = page(document);
+  const startResult = await p.context.handleStartOrInstructionsPage(1);
+  assert.equal(startResult.handled, true);
+  assert.equal(startResult.buttonText, 'Start Test');
+  assert.equal(clicked, true);
+});
+

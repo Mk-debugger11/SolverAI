@@ -15,6 +15,8 @@ import {
   fillQuizNumericAnswerOnPage,
   clickSubmitQuizOnPage,
   detectAssessmentsCatalog,
+  handleStartOrInstructionsPage,
+  detectQuizStartPage,
 } from './modules/quiz/quizDom';
 import QuizDashboard from './modules/quiz/QuizDashboard';
 import QuizQuestionList from './modules/quiz/QuizQuestionList';
@@ -77,6 +79,7 @@ export default function App() {
 
   // Batch Quiz Auto-Solve States (Assessments Catalog)
   const [catalogInfo, setCatalogInfo] = useState(null);
+  const [quizStartInfo, setQuizStartInfo] = useState(null);
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState({
     currentQuizIndex: 0,
@@ -240,10 +243,22 @@ export default function App() {
       const info = await detectAssessmentsCatalog(tId);
       setCatalogInfo(info);
       if (info.isCatalog && info.unsolvedCount > 0) {
+        setQuizStartInfo(null);
         setStatusMessage({
           type: 'info',
           text: `Assessments Catalog: ${info.unsolvedCount} unsolved quiz(zes) pending!`,
         });
+      } else if (!info.isCatalog) {
+        const startInfo = await detectQuizStartPage(tId);
+        setQuizStartInfo(startInfo?.isStartPage ? startInfo : null);
+        if (startInfo?.isStartPage) {
+          setStatusMessage({
+            type: 'info',
+            text: `Quiz Overview: ${startInfo.questionCount ? `${startInfo.questionCount} Questions ready.` : 'Ready to start.'} Click "Start Test" or "Auto-Solve Opened Quiz & Submit" to launch and solve!`,
+          });
+        }
+      } else {
+        setQuizStartInfo(null);
       }
       return info;
     } catch (err) {
@@ -305,12 +320,27 @@ export default function App() {
         const data = await extractQuizQuestionsFromPage(targetTabId, false);
         setCapturedDom(data);
         if (data.questions && data.questions.length > 0) {
+          setQuizStartInfo(null);
           setDomSubView('questions');
+          setStatusMessage({
+            type: 'success',
+            text: `Extracted ${data.questions.length} question(s), including ${data.questions.filter((q) => q.answerType === 'numeric').length} numerical.`,
+          });
+        } else {
+          const startInfo = await detectQuizStartPage(targetTabId);
+          setQuizStartInfo(startInfo?.isStartPage ? startInfo : null);
+          if (startInfo?.isStartPage) {
+            setStatusMessage({
+              type: 'info',
+              text: `Quiz Overview Detected (${startInfo.questionCount ? `${startInfo.questionCount} Questions` : 'Ready to start'}). Click "Start Test" or "Auto-Solve Opened Quiz & Submit" to begin!`,
+            });
+          } else {
+            setStatusMessage({
+              type: 'info',
+              text: 'No questions currently rendered on this page. If this is a test overview, click "Auto-Solve" or "Start Test".',
+            });
+          }
         }
-        setStatusMessage({
-          type: 'success',
-          text: `Extracted ${data.questions.length} question(s), including ${data.questions.filter((q) => q.answerType === 'numeric').length} numerical.`,
-        });
       }
     } catch (err) {
       console.error('DOM extraction error:', err);
@@ -397,9 +427,26 @@ export default function App() {
       const targetTabId = await getFreshActiveTabId();
       // T1: DOM Extraction
       const t1Start = performance.now();
-      const domData = await extractQuizQuestionsFromPage(targetTabId, true);
-      const questions = domData.questions || [];
+      let domData = await extractQuizQuestionsFromPage(targetTabId, true);
+      let questions = domData.questions || [];
       timingTracker.t1 = Math.round(performance.now() - t1Start);
+
+      if (!questions.length) {
+        const startRes = await handleStartOrInstructionsPage(targetTabId);
+        if (startRes?.handled) {
+          setStatusMessage({
+            type: 'info',
+            text: `Clicked "${startRes.buttonText}". Waiting for Question 1 to load...`,
+          });
+          // Poll up to 6 seconds for Question 1 to mount
+          for (let wait = 0; wait < 15; wait++) {
+            await new Promise((r) => setTimeout(r, 400));
+            domData = await extractQuizQuestionsFromPage(targetTabId, true);
+            questions = domData.questions || [];
+            if (questions.length) break;
+          }
+        }
+      }
 
       if (!questions.length) {
         throw new Error('No editable MCQ or numerical question found on the active page.');
@@ -642,6 +689,57 @@ export default function App() {
     }
   };
 
+  // Direct Start Test handler: clicks "Start Test" on webpage and mounts Question 1
+  const handleDirectStartTest = async () => {
+    if (loading || autoRunning || batchRunning || solving || assignmentBusy) return;
+    setLoading(true);
+    setStatusMessage({ type: 'info', text: 'Clicking "Start Test" on webpage...' });
+
+    try {
+      const targetTabId = await getFreshActiveTabId();
+      const res = await handleStartOrInstructionsPage(targetTabId);
+
+      if (res?.handled) {
+        setStatusMessage({
+          type: 'success',
+          text: `Clicked "${res.buttonText}"! Loading Question 1...`,
+        });
+        setQuizStartInfo(null);
+
+        // Poll for Question 1 to mount on the webpage
+        let found = false;
+        for (let attempt = 0; attempt < 15; attempt++) {
+          await new Promise((r) => setTimeout(r, 400));
+          const domData = await extractQuizQuestionsFromPage(targetTabId, false);
+          if (domData?.questions?.length > 0) {
+            setCapturedDom(domData);
+            setDomSubView('questions');
+            setStatusMessage({
+              type: 'success',
+              text: `Quiz started! Loaded Question 1 (${domData.questions.length} question(s) extracted).`,
+            });
+            found = true;
+            break;
+          }
+        }
+
+        if (!found) {
+          await handleFetchDom();
+        }
+      } else {
+        setStatusMessage({
+          type: 'error',
+          text: 'Could not find "Start Test" button on this tab. Ensure the test overview is visible.',
+        });
+      }
+    } catch (err) {
+      console.error('Direct Start Test Error:', err);
+      setStatusMessage({ type: 'error', text: `Failed to start test: ${err.message}` });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleStopAutoSolve = () => {
     autoRunningRef.current = false;
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -840,7 +938,7 @@ export default function App() {
       {view === 'assignments' && (
         <AssignmentDashboard job={assignmentJob} batch={assignmentBatch} activeTabUrl={activeTab?.url} operationBusy={assignmentBusy} busy={assignmentBusy || solving || autoRunning || batchRunning}
           settings={assignmentSettings} onSettingsChange={handleAssignmentSettings} onAction={handleAssignmentAction}
-          onBatchAction={handleAssignmentBatchAction} />
+          onBatchAction={handleAssignmentBatchAction} onSwitchTab={setView} />
       )}
 
       {/* Quiz & DOM Solver View */}
@@ -897,6 +995,8 @@ export default function App() {
             onStartBatchAutoSolve={handleStartBatchAutoSolve}
             onStopBatchAutoSolve={handleStopBatchAutoSolve}
             onScanCatalog={() => handleScanCatalog()}
+            startInfo={quizStartInfo}
+            onDirectStartTest={handleDirectStartTest}
           />
 
           {/* Pipeline Timing Dashboard */}
