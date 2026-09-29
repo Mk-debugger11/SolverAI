@@ -1,6 +1,16 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const router = express.Router();
 const DomRecord = require('../models/DomRecord');
+
+// Capture history is optional. Reject it immediately while MongoDB is down
+// instead of letting Mongoose buffer every request for ten seconds.
+router.use((req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ error: 'Capture history is unavailable because MongoDB is disconnected.' });
+  }
+  next();
+});
 
 // Save a new DOM capture
 router.post('/', async (req, res) => {
