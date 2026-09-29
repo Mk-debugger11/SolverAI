@@ -21,6 +21,10 @@ export function getAssignmentPageScope(value) {
     kind: 'workspace', label: url.pathname.startsWith('/playground/newton-box/') ? 'Notebook assignment' : 'Coding assignment',
     message: 'Solve or inspect the assignment open in this tab.',
   };
+  if (/\/assessment\b|\/test\b|\/quiz\b/i.test(url.pathname)) return {
+    kind: 'quiz', label: 'Quiz detected',
+    message: 'This tab is an MCQ or Numerical Quiz. Switch to the Quizzes tab to auto-solve it.',
+  };
   return {
     kind: 'portal', label: 'Choose an assignment',
     message: 'Open a coding assignment or notebook for a single solve, or the course All Assignments catalog for a batch.',

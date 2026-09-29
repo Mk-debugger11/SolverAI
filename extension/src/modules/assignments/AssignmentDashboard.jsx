@@ -87,7 +87,7 @@ function BatchProgress({ batch, active, stopping, canRecover, onStop, onRecover 
  * Assignment UI only: all inspection, writes, execution and durable state belong
  * to the background runner. onAction(action, payload) may return a promise.
  */
-export default function AssignmentDashboard({ job = null, batch = null, activeTabUrl, busy = false, operationBusy = false, onAction, onBatchAction, settings = {}, onSettingsChange }) {
+export default function AssignmentDashboard({ job = null, batch = null, activeTabUrl, busy = false, operationBusy = false, onAction, onBatchAction, settings = {}, onSettingsChange, onSwitchTab }) {
   const pageScope = getAssignmentPageScope(activeTabUrl);
   const onCatalog = pageScope.kind === 'catalog';
   const onWorkspace = pageScope.kind === 'workspace';
@@ -216,6 +216,16 @@ export default function AssignmentDashboard({ job = null, batch = null, activeTa
     <section className="assignment-launch" aria-label="Solve assignments">
       <div className="assignment-launch-heading"><span className="assignment-step">{onCatalog ? 'COURSE' : 'AUTO'}</span><h3>{pageScope.label}</h3></div>
       <p className="assignment-scope-message">{pageScope.message}</p>
+      {pageScope.kind === 'quiz' && typeof onSwitchTab === 'function' && (
+        <button
+          type="button"
+          className="assignment-button assignment-button-primary assignment-wide"
+          style={{ margin: '10px 0', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' }}
+          onClick={() => onSwitchTab('capture')}
+        >
+          Go to Quizzes Tab →
+        </button>
+      )}
       {!onCatalog && <>
         <button className="assignment-button assignment-button-primary assignment-wide assignment-solve" disabled={!onWorkspace || locked || recoveryRequired || typeof onAction !== 'function'} onClick={() => act('solve', { ...settings })}>Solve this assignment<Icon name="arrow" /></button>
         {onWorkspace && <p className="assignment-note">Chooses supported sources and notebook cells, generates changes, runs checks, and submits when the portal supports it.</p>}

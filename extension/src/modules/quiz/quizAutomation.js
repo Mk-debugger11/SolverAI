@@ -6,6 +6,7 @@ import {
   clickNextQuestionOnPage,
   waitForNextQuestionToRender,
   clickSubmitQuizOnPage,
+  handleStartOrInstructionsPage,
 } from './quizDom';
 import { formatLlmPayload, normalizeNumericAnswer, solveMcq } from '../llm/llmService';
 
@@ -73,6 +74,18 @@ export async function runFullQuizAutomation({
   try {
     if (!tabId) throw new Error('No active Chrome tab found.');
 
+    // 0. Automatically check for "Start Test" / "Start Assessment" overview page and click it
+    try {
+      const startRes = await handleStartOrInstructionsPage(tabId);
+      if (startRes?.handled) {
+        onStatus?.({
+          type: 'info',
+          text: `Clicked "${startRes.buttonText}". Starting quiz and waiting for questions to mount...`,
+        });
+        await new Promise((r) => setTimeout(r, 1200));
+      }
+    } catch {}
+
     while (isRunningRef.current) {
       // 1. Check live quiz navigation on page
       const navInfo = await getQuizNavigationInfo(tabId);
@@ -95,12 +108,24 @@ export async function runFullQuizAutomation({
 
       // 2. Wait for React to mount the question and its answer controls.
       let questions = [];
-      for (let attempt = 0; attempt < 20; attempt++) {
+      for (let attempt = 0; attempt < 25; attempt++) {
         if (!isRunningRef.current) break;
         const domData = await extractQuizQuestionsFromPage(tabId, true);
         if (domData?.questions?.length > 0) {
           questions = domData.questions;
           break;
+        }
+        if (attempt === 3 || attempt === 8) {
+          try {
+            const retryStart = await handleStartOrInstructionsPage(tabId);
+            if (retryStart?.handled) {
+              onStatus?.({
+                type: 'info',
+                text: `Clicked "${retryStart.buttonText}". Mounting questions...`,
+              });
+              await new Promise((r) => setTimeout(r, 1000));
+            }
+          } catch {}
         }
         await new Promise((r) => setTimeout(r, 400));
         if (!isRunningRef.current) break;

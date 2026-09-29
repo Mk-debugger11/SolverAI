@@ -1379,7 +1379,7 @@ export async function clickQuizCardOnCatalog(tabId, cardTarget = 0) {
 
 /**
  * Handles instructions or overview page by detecting and clicking "Start Assessment",
- * "Attempt Quiz", "Start Quiz", "Take Quiz", etc.
+ * "Attempt Quiz", "Start Quiz", "Take Quiz", "Start Test", etc.
  *
  * @param {number} tabId
  * @returns {Promise<Object>}
@@ -1389,110 +1389,462 @@ export async function handleStartOrInstructionsPage(tabId) {
     return { handled: false };
   }
 
-  try {
-    const result = await chrome.scripting.executeScript({
-      target: { tabId },
-      world: 'MAIN',
-      func: () => {
-        const startKeywords = [
-          'start assessment',
-          'attempt assessment',
-          'attempt quiz',
-          'start quiz',
-          'start test',
-          'take assessment',
-          'take quiz',
-          'take test',
-          'resume assessment',
-          'resume quiz',
-          'continue assessment',
-          'start now',
-          'attempt now',
-          'begin assessment',
-          'begin quiz',
-          'launch assessment',
-          'begin',
-          'attempt',
-          'start',
-          'proceed',
-          'continue',
-        ];
+  const executeStartClick = () => {
+    const primaryPhrases = [
+      'start test',
+      'start assessment',
+      'start quiz',
+      'attempt quiz',
+      'attempt test',
+      'attempt assessment',
+      'take test',
+      'take quiz',
+      'take assessment',
+      'begin test',
+      'begin quiz',
+      'begin assessment',
+      'resume test',
+      'resume quiz',
+      'resume assessment',
+    ];
 
-        const allButtons = Array.from(
-          document.querySelectorAll(
-            'button:not([disabled]), [role="button"]:not([disabled]), a:not([disabled]), div[class*="button" i]:not([disabled]), div[class*="btn" i]:not([disabled]), span[class*="button" i]:not([disabled])'
-          )
-        ).filter((button) => {
-          if (button.getAttribute('aria-disabled') === 'true' || !button.getClientRects().length) return false;
-          const text = (button.innerText || button.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const cleanText = (el) => ((el && (el.innerText || el.textContent || el.value)) || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+
+    // 1. Interactive candidate elements
+    const interactive = Array.from(
+      document.querySelectorAll('button, [role="button"], a, input[type="button"], input[type="submit"]')
+    ).filter((el) => !el.disabled && !el.hasAttribute('disabled') && el.getAttribute('aria-disabled') !== 'true');
+
+    // Tier 1: Exact phrase on interactive element
+    let target = interactive.find((el) => primaryPhrases.includes(cleanText(el)));
+
+    // Tier 2: Check child elements (span, div, b, strong) whose direct text is exact phrase
+    if (!target) {
+      const textNodes = Array.from(document.querySelectorAll('button, span, div, b, strong, p, a'));
+      for (const el of textNodes) {
+        const t = cleanText(el);
+        if (primaryPhrases.includes(t)) {
+          const parentBtn = el.closest('button, [role="button"], a, [tabindex="0"]');
+          if (parentBtn && !parentBtn.disabled && !parentBtn.hasAttribute('disabled') && parentBtn.getAttribute('aria-disabled') !== 'true') {
+            target = parentBtn;
+            break;
+          }
+          target = el;
+          break;
+        }
+      }
+    }
+
+    // Tier 3: XPath queries for case-insensitive exact and contains matches
+    if (!target) {
+      const xpathQueries = [
+        "//button[normalize-space(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'))='start test']",
+        "//*[@role='button'][normalize-space(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'))='start test']",
+        "//a[normalize-space(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'))='start test']",
+        "//*[normalize-space(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'))='start test']/ancestor-or-self::button",
+        "//*[normalize-space(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'))='start test']/ancestor-or-self::*[@role='button' or self::button or self::a]",
+        "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'start test')]",
+        "//*[@role='button'][contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'start test')]",
+        "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'start assessment')]",
+        "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'attempt quiz')]",
+        "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'take test')]",
+      ];
+
+      for (const query of xpathQueries) {
+        try {
+          const snap = document.evaluate(query, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+          if (snap && snap.singleNodeValue) {
+            const node = snap.singleNodeValue;
+            if (!node.hasAttribute?.('disabled') && node.getAttribute?.('aria-disabled') !== 'true') {
+              target = node;
+              break;
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // Tier 4: Assessment Overview card context detection
+    if (!target) {
+      const bodyText = (document.body?.innerText || '').toLowerCase();
+      const isOverviewPage =
+        bodyText.includes('test syllabus') ||
+        bodyText.includes('playlist title') ||
+        bodyText.includes('number of questions') ||
+        bodyText.includes('total xp') ||
+        bodyText.includes('scheduled for');
+
+      if (isOverviewPage) {
+        const overviewButtons = interactive.filter((b) => {
+          const text = cleanText(b);
           return !/\b(back|download|logout|cancel|close|submit)\b/.test(text);
         });
 
-        let targetBtn = allButtons.find((btn) => {
-          const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-          return startKeywords.some((kw) => text === kw || (kw.length > 5 && text.includes(kw)));
+        // 4a. Button text containing 'start' or 'attempt' or 'take'
+        target = overviewButtons.find((b) => {
+          const text = cleanText(b);
+          return (text.includes('start') && text.includes('test')) || text.includes('start') || text.includes('attempt') || text.includes('take');
         });
 
-        if (!targetBtn) {
-          const pageText = (document.body.innerText || document.body.textContent || '').toLowerCase();
-          if (
-            pageText.includes('instruction') ||
-            pageText.includes('assessment overview') ||
-            pageText.includes('quiz details') ||
-            pageText.includes('total questions')
-          ) {
-            targetBtn = allButtons.find((btn) => {
-              const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-              return (
-                (text.includes('start') ||
-                  text.includes('attempt') ||
-                  text.includes('continue') ||
-                  text.includes('resume')) &&
-                !text.includes('back') &&
-                !text.includes('download')
-              );
-            });
-          }
-        }
-
-        if (targetBtn) {
-          const btnText = (targetBtn.innerText || targetBtn.textContent || '').trim();
-          try {
-            targetBtn.scrollIntoView({ behavior: 'instant', block: 'center' });
-          } catch {}
-
-          let btnClicked = false;
-          try {
-            if (typeof targetBtn.click === 'function') {
-              targetBtn.click();
-              btnClicked = true;
-            }
-          } catch {}
-
-          if (!btnClicked) {
+        // 4b. Primary green button on overview page
+        if (!target) {
+          target = overviewButtons.find((b) => {
             try {
-              targetBtn.dispatchEvent(
-                new MouseEvent('click', {
-                  bubbles: true,
-                  cancelable: true,
-                  view: window,
-                  detail: 1,
-                  button: 0,
-                })
-              );
+              const bg = window.getComputedStyle(b).backgroundColor || '';
+              const match = bg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+              if (match) {
+                const r = parseInt(match[1], 10);
+                const g = parseInt(match[2], 10);
+                const bVal = parseInt(match[3], 10);
+                if (g > 100 && g > r * 1.3 && g > bVal * 1.3) return true;
+              }
             } catch {}
-          }
-
-          return { handled: true, buttonText: btnText };
+            return false;
+          });
         }
 
-        return { handled: false };
-      },
-    });
+        // 4c. Single actionable button on overview card
+        if (!target && overviewButtons.length === 1) {
+          target = overviewButtons[0];
+        }
+      }
+    }
+
+    // Tier 5: Fallback to exact 'start' or 'attempt' or 'begin'
+    if (!target) {
+      const fallbacks = ['start', 'attempt', 'begin', 'launch', 'proceed'];
+      target = interactive.find((b) => fallbacks.includes(cleanText(b)));
+    }
+
+    if (!target) {
+      return { handled: false };
+    }
+
+    const clickableTarget = target.closest('button, [role="button"], a, input[type="button"], input[type="submit"]') || target;
+    const btnText = (clickableTarget.innerText || clickableTarget.textContent || clickableTarget.value || 'Start Test').replace(/\s+/g, ' ').trim();
+
+    // Scroll into view & focus
+    try {
+      clickableTarget.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+    } catch {}
+    try {
+      clickableTarget.focus?.();
+    } catch {}
+
+    // Compute coordinates
+    let clientX = 100;
+    let clientY = 100;
+    try {
+      const rect = clickableTarget.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        clientX = Math.round(rect.x + rect.width / 2);
+        clientY = Math.round(rect.y + rect.height / 2);
+      }
+    } catch {}
+
+    const commonOpts = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      detail: 1,
+      clientX,
+      clientY,
+      screenX: clientX,
+      screenY: clientY,
+      button: 0,
+      buttons: 1,
+    };
+
+    // Dispatch Pointer Events
+    if (typeof window.PointerEvent === 'function') {
+      try {
+        clickableTarget.dispatchEvent(new PointerEvent('pointerover', { ...commonOpts, pointerId: 1, pointerType: 'mouse' }));
+        clickableTarget.dispatchEvent(new PointerEvent('pointerenter', { ...commonOpts, pointerId: 1, pointerType: 'mouse' }));
+        clickableTarget.dispatchEvent(new PointerEvent('pointerdown', { ...commonOpts, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+      } catch {}
+    }
+
+    // Dispatch Mouse Events
+    try {
+      clickableTarget.dispatchEvent(new MouseEvent('mouseover', commonOpts));
+      clickableTarget.dispatchEvent(new MouseEvent('mousedown', commonOpts));
+    } catch {}
+
+    if (typeof window.PointerEvent === 'function') {
+      try {
+        clickableTarget.dispatchEvent(new PointerEvent('pointerup', { ...commonOpts, buttons: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+      } catch {}
+    }
+
+    try {
+      clickableTarget.dispatchEvent(new MouseEvent('mouseup', { ...commonOpts, buttons: 0 }));
+      clickableTarget.dispatchEvent(new MouseEvent('click', { ...commonOpts, buttons: 0 }));
+    } catch {}
+
+    // Native .click()
+    try {
+      if (typeof clickableTarget.click === 'function') {
+        clickableTarget.click();
+      }
+    } catch {}
+
+    if (target !== clickableTarget) {
+      try {
+        if (typeof target.click === 'function') {
+          target.click();
+        }
+      } catch {}
+    }
+
+    // React Fiber Props onClick direct invocation
+    const elementsToCheck = [
+      clickableTarget,
+      target,
+      ...Array.from(clickableTarget.querySelectorAll('*')).slice(0, 5),
+      clickableTarget.parentElement,
+      clickableTarget.parentElement?.parentElement,
+    ].filter(Boolean);
+
+    for (const el of elementsToCheck) {
+      try {
+        const propKey = Object.keys(el).find((k) => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
+        if (propKey && el[propKey]) {
+          const props = el[propKey];
+          if (typeof props.onClick === 'function') {
+            props.onClick({
+              preventDefault: () => {},
+              stopPropagation: () => {},
+              stopImmediatePropagation: () => {},
+              target: el,
+              currentTarget: el,
+              nativeEvent: new MouseEvent('click', commonOpts),
+              persist: () => {},
+            });
+            break;
+          }
+        }
+      } catch {}
+    }
+
+    // Anchor link href fallback
+    if (clickableTarget.tagName === 'A' && clickableTarget.href && !clickableTarget.href.startsWith('javascript:')) {
+      try {
+        const curUrl = window.location.href;
+        setTimeout(() => {
+          if (window.location.href === curUrl && clickableTarget.href !== curUrl) {
+            window.location.assign(clickableTarget.href);
+          }
+        }, 300);
+      } catch {}
+    }
+
+    return { handled: true, buttonText: btnText || 'Start Test' };
+  };
+
+  try {
+    let result;
+    try {
+      result = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: executeStartClick,
+      });
+    } catch {
+      result = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: executeStartClick,
+      });
+    }
 
     return result?.[0]?.result || { handled: false };
   } catch (err) {
     return { handled: false, error: err.message };
+  }
+}
+
+/**
+ * Detects if the current active tab is on an assessment overview / launch page
+ * with a "Start Test" or "Start Assessment" button, extracting quiz metadata.
+ *
+ * @param {number} tabId
+ * @returns {Promise<Object>}
+ */
+export async function detectQuizStartPage(tabId) {
+  if (typeof chrome === 'undefined' || !chrome.scripting || !tabId) {
+    return { isStartPage: false };
+  }
+
+  const executeDetectStartPage = () => {
+    const primaryPhrases = [
+      'start test',
+      'start assessment',
+      'start quiz',
+      'attempt quiz',
+      'attempt test',
+      'attempt assessment',
+      'take test',
+      'take quiz',
+      'take assessment',
+      'begin test',
+      'begin quiz',
+      'begin assessment',
+      'resume test',
+      'resume quiz',
+      'resume assessment',
+    ];
+
+    const cleanText = (el) => ((el && (el.innerText || el.textContent || el.value)) || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+
+    const bodyText = (document.body?.innerText || '').toLowerCase();
+    const hasQuizMetadata =
+      bodyText.includes('test syllabus') ||
+      bodyText.includes('playlist title') ||
+      bodyText.includes('number of questions') ||
+      bodyText.includes('total xp') ||
+      bodyText.includes('scheduled for');
+
+    // Interactive elements
+    const interactive = Array.from(
+      document.querySelectorAll('button, [role="button"], a, input[type="button"], input[type="submit"]')
+    ).filter((el) => !el.disabled && !el.hasAttribute('disabled') && el.getAttribute('aria-disabled') !== 'true');
+
+    let target = interactive.find((el) => primaryPhrases.includes(cleanText(el)));
+
+    if (!target) {
+      const textNodes = Array.from(document.querySelectorAll('button, span, div, b, strong, p, a'));
+      for (const el of textNodes) {
+        const t = cleanText(el);
+        if (primaryPhrases.includes(t)) {
+          const parentBtn = el.closest('button, [role="button"], a, [tabindex="0"]');
+          if (parentBtn && !parentBtn.disabled && !parentBtn.hasAttribute('disabled') && parentBtn.getAttribute('aria-disabled') !== 'true') {
+            target = parentBtn;
+            break;
+          }
+          target = el;
+          break;
+        }
+      }
+    }
+
+    if (!target) {
+      const xpathQueries = [
+        "//button[normalize-space(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'))='start test']",
+        "//*[@role='button'][normalize-space(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'))='start test']",
+        "//a[normalize-space(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'))='start test']",
+        "//*[normalize-space(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'))='start test']/ancestor-or-self::button",
+        "//*[normalize-space(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'))='start test']/ancestor-or-self::*[@role='button' or self::button or self::a]",
+        "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'start test')]",
+        "//*[@role='button'][contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'start test')]",
+        "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'start assessment')]",
+        "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'attempt quiz')]",
+      ];
+
+      for (const query of xpathQueries) {
+        try {
+          const snap = document.evaluate(query, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+          if (snap && snap.singleNodeValue) {
+            const node = snap.singleNodeValue;
+            if (!node.hasAttribute?.('disabled') && node.getAttribute?.('aria-disabled') !== 'true') {
+              target = node;
+              break;
+            }
+          }
+        } catch {}
+      }
+    }
+
+    if (!target && hasQuizMetadata) {
+      const overviewButtons = interactive.filter((b) => {
+        const text = cleanText(b);
+        return !/\b(back|download|logout|cancel|close|submit)\b/.test(text);
+      });
+
+      target = overviewButtons.find((b) => {
+        const text = cleanText(b);
+        return (text.includes('start') && text.includes('test')) || text.includes('start') || text.includes('attempt') || text.includes('take');
+      });
+
+      if (!target) {
+        target = overviewButtons.find((b) => {
+          try {
+            const bg = window.getComputedStyle(b).backgroundColor || '';
+            const match = bg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+            if (match) {
+              const r = parseInt(match[1], 10);
+              const g = parseInt(match[2], 10);
+              const bVal = parseInt(match[3], 10);
+              if (g > 100 && g > r * 1.3 && g > bVal * 1.3) return true;
+            }
+          } catch {}
+          return false;
+        });
+      }
+
+      if (!target && overviewButtons.length === 1) {
+        target = overviewButtons[0];
+      }
+    }
+
+    if (target || hasQuizMetadata) {
+      const qCountMatch = bodyText.match(/(\d+)\s+questions/i);
+      const questionCount = qCountMatch ? parseInt(qCountMatch[1], 10) : null;
+
+      const xpMatch = bodyText.match(/total\s*xp\s*(\d+)/i) || bodyText.match(/(\d+)\s*xp/i);
+      const totalXp = xpMatch ? parseInt(xpMatch[1], 10) : null;
+
+      // Extract Playlist Title
+      let playlistTitle = '';
+      const playlistEl = Array.from(document.querySelectorAll('div, p, span, h1, h2, h3, h4')).find((el) => {
+        return (el.innerText || '').toLowerCase().includes('playlist title');
+      });
+      if (playlistEl) {
+        const nextEl = playlistEl.nextElementSibling || playlistEl.parentElement?.querySelector('h1, h2, h3, h4, p:not(:first-child)');
+        if (nextEl) {
+          playlistTitle = (nextEl.innerText || nextEl.textContent || '').trim();
+        }
+      }
+
+      const btnText = target
+        ? ((target.innerText || target.textContent || target.value || 'Start Test').replace(/\s+/g, ' ').trim())
+        : 'Start Test';
+
+      return {
+        isStartPage: true,
+        buttonText: btnText,
+        questionCount,
+        totalXp,
+        playlistTitle,
+      };
+    }
+
+    return { isStartPage: false };
+  };
+
+  try {
+    let result;
+    try {
+      result = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: executeDetectStartPage,
+      });
+    } catch {
+      result = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: executeDetectStartPage,
+      });
+    }
+
+    return result?.[0]?.result || { isStartPage: false };
+  } catch {
+    return { isStartPage: false };
   }
 }
 

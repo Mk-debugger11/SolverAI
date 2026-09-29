@@ -46,6 +46,10 @@ export default function QuizDashboard({
   onStartBatchAutoSolve,
   onStopBatchAutoSolve,
   onScanCatalog,
+
+  // Start / Overview Page Props
+  startInfo,
+  onDirectStartTest,
 }) {
   const isCatalog = Boolean(catalogInfo?.isCatalog);
   const unsolvedCount = catalogInfo?.unsolvedCount ?? 0;
@@ -73,6 +77,57 @@ export default function QuizDashboard({
               Refresh
             </button>
           )}
+        </div>
+      )}
+
+      {/* Quiz Overview / Start Test Page Card */}
+      {startInfo?.isStartPage && !isCatalog && (
+        <div className="quiz-start-card">
+          <div className="quiz-start-header">
+            <div className="quiz-start-badge">
+              <IconPlay size={12} />
+              <span>Quiz Ready to Launch</span>
+            </div>
+            <div className="quiz-start-meta">
+              {startInfo.questionCount ? (
+                <span className="quiz-start-badge-pill questions">
+                  {startInfo.questionCount} Questions
+                </span>
+              ) : null}
+              {startInfo.totalXp ? (
+                <span className="quiz-start-badge-pill xp">
+                  {startInfo.totalXp} XP
+                </span>
+              ) : null}
+            </div>
+          </div>
+          {startInfo.playlistTitle ? (
+            <div className="quiz-start-playlist-title" title={startInfo.playlistTitle}>
+              {startInfo.playlistTitle}
+            </div>
+          ) : null}
+          <div className="quiz-start-actions">
+            <button
+              id="direct-start-test-btn"
+              className="btn btn-direct-start"
+              onClick={onDirectStartTest}
+              disabled={autoRunning || batchRunning || solving || loading}
+              title="Click 'Start Test' on the webpage to navigate to Question 1"
+            >
+              <IconPlay size={13} />
+              <span>{loading ? 'Starting...' : 'Click "Start Test"'}</span>
+            </button>
+            <button
+              id="start-and-autosolve-btn"
+              className="btn btn-start-autosolve"
+              onClick={onStartAutoSolve}
+              disabled={autoRunning || batchRunning || solving || loading}
+              title="Start quiz and automatically solve all questions through submit"
+            >
+              <IconZap size={13} />
+              <span>Start & Auto-Solve All</span>
+            </button>
+          </div>
         </div>
       )}
 

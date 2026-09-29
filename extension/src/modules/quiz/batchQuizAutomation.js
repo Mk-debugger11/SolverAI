@@ -58,8 +58,14 @@ export async function runBatchQuizAutomation({
   const isQuizUrl = (value) => {
     try {
       const url = new URL(value);
-      return url.protocol === 'https:' && url.hostname === 'my.newtonschool.co' &&
-        /^\/course\/[^/]+\/assessment\/[^/]+\/?$/.test(url.pathname);
+      if (url.protocol !== 'https:' || url.hostname !== 'my.newtonschool.co') return false;
+      if (url.pathname.includes('/all_assessments') || url.pathname.includes('/all_assignments')) return false;
+      return (
+        /^\/course\/[^/]+\/assessment\/[^/]+/.test(url.pathname) ||
+        /\/assessment\/[^/]+/.test(url.pathname) ||
+        /\/test\/[^/]+/.test(url.pathname) ||
+        /\/quiz\/[^/]+/.test(url.pathname)
+      );
     } catch { return false; }
   };
 

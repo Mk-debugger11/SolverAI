@@ -48,6 +48,9 @@ function quiz({ count = 2, unknownCounters = false, ...overrides } = {}) {
     setTimeout(fn, delay) { overrides.delay?.({ delay, isRunningRef }); fn(); },
     formatLlmPayload,
     normalizeNumericAnswer,
+    async handleStartOrInstructionsPage() {
+      return overrides.startPage?.() ?? { handled: false };
+    },
     async extractQuizQuestionsFromPage() {
       extractionCount++;
       return overrides.extract?.({ page, extractionCount, questions, isRunningRef })
@@ -361,3 +364,22 @@ for (const answerType of ['mcq', 'numeric']) {
     assert.equal(app.completion.success, false);
   });
 }
+
+test('automatically clicks Start Test on an overview page and solves the quiz', async () => {
+  let startClicked = false;
+  const questions = [question(1)];
+  const app = quiz({
+    questions,
+    startPage() {
+      startClicked = true;
+      return { handled: true, buttonText: 'Start Test' };
+    },
+    solve: () => ({ answer: 'B', cacheHit: true, usage: { total_tokens: 10 } }),
+  });
+  await app.run();
+  assert.equal(startClicked, true);
+  assert.equal(app.calls.solves.length, 1);
+  assert.equal(app.calls.clicks.length, 1);
+  assert.equal(app.calls.submissions, 1);
+  assert.equal(app.completion.success, true);
+});
